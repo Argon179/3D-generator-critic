@@ -70,3 +70,29 @@ def test_multiview_keeps_holdout_out_of_reconstruction(tmp_path,monkeypatch):
     assert state['iterations'][0]['metrics']['heldout']['count']==1
     assert (folder/'iteration_00/sf3d.obj').is_file()
     assert (folder/'iteration_00/reconstruction/mesh.obj').is_file()
+
+
+def test_neural_multiview_bypasses_sf3d_and_marks_holdout(tmp_path,monkeypatch):
+    from pathlib import Path
+    root=tmp_path/'project';runs=root/'runs';runs.mkdir(parents=True)
+    monkeypatch.setattr(core,'ROOT',root);monkeypatch.setattr(core,'RUNS',runs)
+    monkeypatch.setattr(pipeline,'ROOT',root);monkeypatch.setattr(pipeline,'RUNS',runs)
+    cfg=core.config();ident='abcdee123456';folder=runs/ident;folder.mkdir()
+    refs=[{'path':str(folder/f'{i}.png'),'azimuth_deg':i*30} for i in range(12)]
+    core.save_json(folder/'state.json',{'id':ident,'status':'queued','config':cfg,'parameters':{'seed':42,'background':'alpha','prompt':'a sphere','iterations':0,'generator':'hunyuan'},'references':refs,'iterations':[],'events':[]})
+    def generate(run_id,args,**kwargs):
+        assert str(args[-2]).endswith('multiview_worker.py')
+        job=json.loads(args[-1].read_text());out=Path(job['out'])
+        selected=set(job['selected'].values());assert selected=={0,3,6,9}
+        trimesh.creation.icosphere(subdivisions=1).export(out/'generated.glb')
+        core.save_json(out/'references.json',[dict(r,prepared=r['path'],used_for_generation=i in selected) for i,r in enumerate(refs)])
+    monkeypatch.setattr(pipeline,'command',generate)
+    monkeypatch.setattr(pipeline,'render',lambda *args:None)
+    monkeypatch.setattr(pipeline,'align',lambda *args:{'silhouette_iou':.9,'pairs':[{'reference_index':i,'iou':.9,'render':'x.png'} for i in range(12)]})
+    monkeypatch.setattr(pipeline,'criticize',lambda *args:pipeline.Critique(summary_ru='Fixture',camera_mismatch=False,confidence=.9,should_edit=False,base_description='a sphere',target_description='a sphere'))
+    pipeline.execute(ident)
+    state=core.read_run(ident)
+    assert state['status']=='completed',state.get('error')
+    assert state['iterations'][0]['backend']=='Hunyuan3D-2mv'
+    assert state['iterations'][0]['metrics']['heldout']['count']==8
+    assert not (folder/'iteration_00/sf3d.obj').exists()

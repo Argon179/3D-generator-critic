@@ -1,0 +1,162 @@
+[
+  {
+    "run": "d1a6a0103c77",
+    "status": "completed",
+    "generator": "hunyuan",
+    "memory": {
+      "peak_vram_mb": 2893.654296875,
+      "peak_ram_mb": 9958.12890625,
+      "seconds": 84.24448293800015,
+      "backend": "hunyuan"
+    },
+    "generation": {
+      "backend": "hunyuan",
+      "selected": {
+        "front": 0,
+        "left": 1,
+        "back": 4,
+        "right": 7
+      },
+      "heldout": [
+        2,
+        3,
+        5,
+        6,
+        8,
+        9,
+        10,
+        11
+      ],
+      "candidates": [],
+      "model": "tencent/Hunyuan3D-2mv",
+      "revision": "3a761b539b29fe4ff64714813aa9560fd66f5de0",
+      "note": "Holdout images were not passed to the neural model."
+    },
+    "geometry": {
+      "watertight": true,
+      "winding_consistent": true,
+      "components": 1,
+      "surface_area": 9.01784012518419,
+      "volume": 1.4111137024646954,
+      "volume_to_convex_hull": 0.6861500503725543,
+      "flat_cap_fraction": 0.15341425136123005,
+      "principal_spreads": [
+        0.3546756845760275,
+        0.408931255770947,
+        0.5568992237734702
+      ],
+      "thickness_ratio": 0.6368758824492433,
+      "severity": "none",
+      "axis_extents": [
+        1.5910448,
+        1.35540492,
+        2.0
+      ],
+      "warning_ru": "Выраженная плоскостность не обнаружена; это не подтверждает правильность формы.",
+      "limitations": "Эвристика толщины поверхности, не сравнение с эталонной 3D-моделью."
+    },
+    "heldout": {
+      "count": 8,
+      "iou": 0.9040799608156177,
+      "boundary_f1": 0.6027923372179138,
+      "contour_distance": 0.011787896819245396
+    },
+    "critique": {
+      "summary_ru": "Силуэт и пропорции в целом согласуются, но в профильном виде видна тонкая структура, что может указывать на отсутствие объема. Нет явных признаков сжатия или листовой формы.",
+      "camera_mismatch": false,
+      "confidence": 0.7,
+      "should_edit": true,
+      "issues": [
+        {
+          "part": "body",
+          "observation_ru": "В профильном виде (азимут 0°, 180°) объект выглядит тонким и плоским, что может указывать на отсутствие объема в этой области.",
+          "suggestion_ru": "Добавить небольшую толщину в основание и тело для создания объемного эффекта."
+        }
+      ],
+      "quality_warnings": [
+        "VLM указывает на плоскостность, но численная проверка не обнаруживает глобально тонкую сетку или крупный плоский срез. Оценки расходятся: проверьте независимые виды. Глобальная толщина не исключает локальных дефектов."
+      ],
+      "base_description": "a yellow rubber duck",
+      "target_description": "a yellow rubber duck with visible volume and rounded contours"
+    }
+  },
+  {
+    "run": "027a5373dbb7",
+    "status": "completed",
+    "generator": "da3",
+    "memory": {
+      "peak_vram_mb": 1700.8017578125,
+      "peak_ram_mb": 2340.16796875,
+      "seconds": 14.6096335000002,
+      "backend": "da3"
+    },
+    "generation": {
+      "backend": "da3",
+      "selected": [
+        0,
+        2,
+        3,
+        4,
+        5,
+        7,
+        8,
+        9,
+        10
+      ],
+      "heldout": [
+        1,
+        6,
+        11
+      ],
+      "candidates": [],
+      "model": "depth-anything/DA3-BASE",
+      "revision": "f4a6c9b3c95e41c82048423d3493a81ec3fa810e",
+      "note": "Holdout images were not passed to the neural model."
+    },
+    "geometry": {
+      "watertight": false,
+      "winding_consistent": true,
+      "components": 2,
+      "surface_area": 17.773892978951928,
+      "volume": null,
+      "volume_to_convex_hull": null,
+      "flat_cap_fraction": 0.0013290131398894134,
+      "principal_spreads": [
+        0.2868934310257076,
+        0.4110897433203534,
+        0.537748515630531
+      ],
+      "thickness_ratio": 0.5335085503477659,
+      "severity": "none",
+      "axis_extents": [
+        1.95332062,
+        1.57885746,
+        2.0
+      ],
+      "warning_ru": "Выраженная плоскостность не обнаружена; это не подтверждает правильность формы.",
+      "limitations": "Эвристика толщины поверхности, не сравнение с эталонной 3D-моделью."
+    },
+    "heldout": {
+      "count": 3,
+      "iou": 0.5791640119553761,
+      "boundary_f1": 0.14890411769391756,
+      "contour_distance": 0.051003166467764226
+    },
+    "critique": {
+      "summary_ru": "Рендер не соответствует референсу по форме: объект выглядит как разрушенная масса, а не объемная фигурка утконоса. Нет пропорций тела, головы и выступающих частей.",
+      "camera_mismatch": false,
+      "confidence": 0.9,
+      "should_edit": true,
+      "issues": [
+        {
+          "part": "entire mesh",
+          "observation_ru": "Объект в ренде представляет собой разрушенную массу без четких пропорций и объема, в отличие от референса.",
+          "suggestion_ru": "Восстановите объемную форму утконоса с пропорциональными частями тела, головы и выступающих элементов."
+        }
+      ],
+      "quality_warnings": [],
+      "base_description": "a yellow rubber duck",
+      "target_description": "a yellow rubber duck"
+    }
+  }
+]

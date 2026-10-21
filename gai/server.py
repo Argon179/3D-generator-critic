@@ -74,6 +74,7 @@ class RunRequest(BaseModel):
     iterations:int=Field(default=1,ge=0,le=3)
     background:str='rembg'
     generator:str='auto'
+    view_sides:dict[str,int]|None=None
     crop:list[float]|None=None
 
 
@@ -84,7 +85,7 @@ def create_run(body:RunRequest):
     indexes=list(dict.fromkeys(body.image_indexes))
     if len(indexes)<2 or any(i<0 or i>=len(dataset['images']) for i in indexes):raise HTTPException(400,'Выберите минимум два разных ракурса')
     if body.generation_index not in indexes:raise HTTPException(400,'Фото для генерации должно быть выбрано')
-    if body.generator not in {'auto','sf3d','multiview'}:raise HTTPException(400,'Неизвестный генератор')
+    if body.generator not in {'auto','sf3d','multiview','hunyuan','da3'}:raise HTTPException(400,'Неизвестный генератор')
     if body.generator=='multiview' and (len(indexes)<5 or any(dataset['images'][i].get('azimuth_deg') is None for i in indexes)):
         raise HTTPException(400,'Для многовидового режима нужны минимум 5 фото с известными азимутами')
     if body.background not in {'black','white','rembg','alpha'}:raise HTTPException(400,'Неизвестный режим фона')
@@ -92,7 +93,15 @@ def create_run(body:RunRequest):
         if len(body.crop)!=4:raise HTTPException(400,'ROI: x,y,width,height')
         x,y,w,h=body.crop
         if not all(0<=v<=1 for v in body.crop) or w<=0 or h<=0 or x+w>1 or y+h>1:raise HTTPException(400,'ROI должен лежать внутри изображения')
-    missing=[x['name'] for x in weight_checks() if not x['ok']]
+    ordered=[body.generation_index]+[i for i in indexes if i!=body.generation_index]
+    if body.generator in {'hunyuan','da3'}:
+        from gai.multiview import select_views
+        try:select_views([dataset['images'][i] for i in ordered],body.generator,body.view_sides)
+        except ValueError as exc:raise HTTPException(400,str(exc))
+        from gai.core import multiview_checks
+        missing=[x['name'] for x in multiview_checks(body.generator) if not x['ok']]
+        if missing:raise HTTPException(409,'Генератор ещё не готов: '+', '.join(missing)+'. См. scripts/setup_multiview.py')
+    missing=[x['name'] for x in weight_checks() if not x['ok'] and (body.generator not in {'hunyuan','da3'} or x['name']!='Веса SF3D')]
     if missing:raise HTTPException(409,'Веса ещё не полностью загружены: '+', '.join(missing)+'. Дождитесь завершения загрузки; инструкция — в README.md.')
     ordered=[body.generation_index]+[i for i in indexes if i!=body.generation_index]
     refs=[dict(dataset['images'][i],path=str(ROOT/dataset['images'][i]['path']),crop=body.crop) for i in ordered]
@@ -161,7 +170,7 @@ def files(relative:str):
     allowed=[(ROOT/'reference_images').resolve(),RUNS.resolve()]
     if not any(p.is_relative_to(a) for a in allowed) or not p.is_file():raise HTTPException(404,'Файл не найден')
     # No local tokens, config files or executable HTML can be served.
-    if p.suffix.lower() not in {'.png','.jpg','.jpeg','.webp','.obj','.glb','.json','.txt','.log','.csv'}:raise HTTPException(403,'Этот тип файла не доступен')
+    if p.suffix.lower() not in {'.png','.jpg','.jpeg','.webp','.obj','.glb','.json','.txt','.log','.csv','.npz','.ply'}:raise HTTPException(403,'Этот тип файла не доступен')
     return FileResponse(p,headers={'X-Content-Type-Options':'nosniff'})
 
 

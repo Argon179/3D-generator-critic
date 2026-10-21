@@ -13,7 +13,7 @@ def stage_inventory(ident):
     for p in sorted((folder/'source_images').glob('*')):
         ref=next((r for r in state['references'] if Path(r['path'])==p),{})
         inputs['images'].append({'path':str(p.relative_to(ROOT)),'label':p.name+(f" · {ref['azimuth_deg']}°" if ref.get('azimuth_deg') is not None else '')})
-    generation=stage('generation','SF3D · все кандидаты')
+    generation=stage('generation',{'hunyuan':'Hunyuan3D-2mv · генерация','da3':'DA3 · глубина, камеры и сетка'}.get(state['parameters'].get('generator'),'SF3D · все кандидаты'))
     for p in sorted(folder.rglob('*')):
         if not p.is_file() or p.is_symlink() or 'source_images' in p.parts or 'previews' in p.parts:continue
         rel=p.relative_to(folder);parts=rel.parts
@@ -36,7 +36,7 @@ def stage_inventory(ident):
             target['models'].append(item)
         elif p.suffix.lower() in {'.png','.jpg','.jpeg'}:
             target['images'].append(item)
-        elif p.suffix.lower() in {'.json','.txt','.log'}:
+        elif p.suffix.lower() in {'.json','.txt','.log','.npz','.ply'}:
             target['files'].append(item)
             if p.suffix=='.json' and p.stat().st_size<200_000:
                 try:

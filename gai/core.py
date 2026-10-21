@@ -88,7 +88,7 @@ def library():
                 images.append({"path": rel, "azimuth_deg": m.get("azimuth_deg")})
             if images:
                 label, prompt = labels.get(folder.name, (folder.name, ""))
-                groups.append({"id": folder.relative_to(ROOT).as_posix(), "name": label, "prompt": prompt, "images": images, "warning": "128 × 128: только грубая форма" if folder.name in {"rubber_duck", "lucky_cat", "frog"} else "Нужно выделить деталь на платформе" if folder.name in {"gear", "nut"} else ""})
+                groups.append({"id": folder.relative_to(ROOT).as_posix(), "name": label, "prompt": prompt, "images": images, "front_azimuth_deg": {"rubber_duck":270,"lucky_cat":0}.get(folder.name), "warning": "128 × 128: только грубая форма" if folder.name in {"rubber_duck", "lucky_cat", "frog"} else "Нужно выделить деталь на платформе" if folder.name in {"gear", "nut"} else ""})
     return groups
 
 
@@ -164,6 +164,18 @@ def weight_checks(cfg=None):
     return checks
 
 
+def multiview_checks(backend, cfg=None):
+    cfg=cfg or config()
+    model=cfg[backend+'_model']
+    from gai.multiview import cached_snapshot
+    files=(['config.yaml','model.fp16.safetensors'] if backend=='hunyuan' else ['config.json','model.safetensors'])
+    sub=cfg['hunyuan_subfolder'] if backend=='hunyuan' else ''
+    ready=cached_snapshot(ROOT/'.cache/huggingface',model,[str(Path(sub)/f) for f in files],cfg.get(backend+'_revision')) is not None
+    return [{'name':backend+' · окружение','ok':local_path(cfg[backend+'_python']).is_file() and (local_path(cfg[backend+'_python']).parent.parent/'ready.json').is_file(),'detail':'Изолированное окружение; готовность после проверки импортов'},
+            {'name':backend+' · исходный код','ok':local_path(cfg[backend+'_repo']).is_dir(),'detail':cfg[backend+'_repo']},
+            {'name':backend+' · веса','ok':ready,'detail':model}]
+
+
 def doctor():
     cfg = config()
     checks = []
@@ -192,7 +204,8 @@ def doctor():
             check(name, r.returncode == 0, "Импорты и CUDA доступны" if r.returncode == 0 else "\n".join(lines[-4:])[-900:])
         except (OSError, subprocess.TimeoutExpired) as e:
             check(name, False, str(e))
+    optional={name:multiview_checks(name,cfg) for name in ('hunyuan','da3')}
     free = shutil.disk_usage(ROOT).free / 1024 ** 3
     check("Свободное место", free >= 12, f"{free:.1f} ГБ; веса скачиваются отдельно")
     checks.extend(weight_checks(cfg))
-    return {"checks": checks, "ready": all(x["ok"] for x in checks), "note": "Импорты не подтверждают наличие весов. Первый запуск может скачать веса; SF3D требует доступа Hugging Face."}
+    return {"optional_generators":optional,"checks": checks, "ready": all(x["ok"] for x in checks), "note": "Импорты не подтверждают наличие весов. Первый запуск может скачать веса; SF3D требует доступа Hugging Face."}

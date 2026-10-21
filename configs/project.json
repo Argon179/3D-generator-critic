@@ -11,11 +11,27 @@
   "qwen_revision": "ebb281ec70b05090aa6165b016eac8ec08e71b17",
   "render_resolution": 384,
   "render_step_deg": 30,
-  "render_elevations": [0, 20, 40],
+  "render_elevations": [
+    0,
+    20,
+    40
+  ],
   "critic_pairs": 3,
   "textdeformer_epochs": 150,
   "textdeformer_batch_size": 2,
   "textdeformer_train_res": 224,
   "max_faces": 12000,
-  "acceptance_margin": 0.005
+  "acceptance_margin": 0.005,
+  "hunyuan_python": ".venvs/hunyuan/bin/python",
+  "hunyuan_repo": "vendor/Hunyuan3D-2",
+  "hunyuan_model": "tencent/Hunyuan3D-2mv",
+  "hunyuan_subfolder": "hunyuan3d-dit-v2-mv",
+  "hunyuan_steps": 30,
+  "hunyuan_resolution": 256,
+  "da3_python": ".venvs/da3/bin/python",
+  "da3_repo": "vendor/Depth-Anything-3",
+  "da3_model": "depth-anything/DA3-BASE",
+  "da3_resolution": 336,
+  "hunyuan_revision": "3a761b539b29fe4ff64714813aa9560fd66f5de0",
+  "da3_revision": "f4a6c9b3c95e41c82048423d3493a81ec3fa810e"
 }
