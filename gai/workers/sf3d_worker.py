@@ -18,6 +18,7 @@ def main():
     from unittest.mock import patch
     import open_clip
     from gai.masks import uniform_background
+    from gai.geometry import geometry_report
     if not torch.cuda.is_available():
         raise RuntimeError('CUDA недоступна. Запустите приложение вне песочницы.')
     torch.manual_seed(job['seed'])
@@ -59,9 +60,45 @@ def main():
     with patch.object(Dinov2Model,'from_pretrained',classmethod(dino_architecture)), patch.object(open_clip,'create_model_and_transforms',clip_architecture):
         model = SF3D.from_pretrained(snapshot, config_name='config.yaml', weight_name='model.safetensors').to('cuda').eval()
     torch.cuda.reset_peak_memory_stats()
-    with torch.inference_mode(), torch.autocast(device_type='cuda',dtype=torch.bfloat16):
-        mesh, _ = model.run_image(Image.open(refs[0]['prepared']),bake_resolution=512,remesh='none',vertex_count=-1)
+    candidates=[]
+    def generate(index):
+        with torch.inference_mode(), torch.autocast(device_type='cuda',dtype=torch.bfloat16):
+            mesh, _ = model.run_image(Image.open(refs[index]['prepared']),bake_resolution=512,remesh='none',vertex_count=-1)
+        report=geometry_report(mesh)
+        mesh.export(out/f'candidate_{index:02d}.glb',include_normals=True)
+        candidates.append({'reference_index':index,'geometry':report})
+        print(f"SF3D reference {index}: thickness ratio {report['thickness_ratio']:.3f}",flush=True)
+        return mesh,report
+    mesh,report=generate(0)
+    chosen=0
+    # SF3D is single-view. Retry individual available photos rather than stretch
+    # the flattened mesh and pretend missing geometry has been reconstructed.
+    if report['severity']!='none' and len(refs)>1:
+        def priority(index,target):
+            im=Image.open(refs[index]['prepared'])
+            box=im.getchannel('A').getbbox()
+            width,height=box[2]-box[0],box[3]-box[1]
+            angle=refs[index].get('azimuth_deg')
+            base=refs[0].get('azimuth_deg')
+            separation=min((angle-base)%360,(base-angle)%360) if angle is not None and base is not None else 90
+            return (-abs(min(separation,180-separation)-target),width/max(height,1))
+        pool=list(range(1,len(refs)));remaining=[]
+        for target in (90,45):
+            if pool:
+                index=max(pool,key=lambda i:priority(i,target));remaining.append(index);pool.remove(index)
+        for index in remaining:
+            candidate,candidate_report=generate(index)
+            if candidate_report['thickness_ratio']>report['thickness_ratio']:
+                mesh,report,chosen=candidate,candidate_report,index
+            if report['severity']=='none':break
     mesh.export(out/'generated.glb',include_normals=True)
+    # Exclude EVERY attempted generation photograph from holdout acceptance.
+    attempted={c['reference_index'] for c in candidates}
+    refs=[dict(r,used_for_generation=i in attempted) for i,r in enumerate(refs)]
+    refs=[refs[chosen],*[r for i,r in enumerate(refs) if i!=chosen]]
+    (out/'references.json').write_text(json.dumps(refs,ensure_ascii=False,indent=2))
+    (out/'generation_quality.json').write_text(json.dumps({'selected_reference_index':chosen,
+        'candidates':candidates,'selection':'Largest thickness ratio among attempted views; not a 3D accuracy score.'},ensure_ascii=False,indent=2))
     (out/'memory.json').write_text(json.dumps({'peak_vram_mb':torch.cuda.max_memory_allocated()/1024**2}))
 
 

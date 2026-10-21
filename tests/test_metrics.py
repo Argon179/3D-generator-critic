@@ -42,3 +42,21 @@ def test_edit_cannot_win_by_only_improving_generation_image():
     assert not acceptance(report([.5,.8,.8]),report([1,.7,.7]))[0]
     assert acceptance(report([.5,.6,.6]),report([.5,.7,.7]))[0]
     assert not acceptance(report([.5,.7,.6]),report([.5,.66,.8]))[0]
+
+
+def test_top_audit_cannot_replace_reference_camera(tmp_path):
+    rgba(tmp_path/'reference.png',(10,20,79,39))
+    rgba(tmp_path/'front.png',(20,10,39,79))
+    rgba(tmp_path/'top.png',(10,20,79,39))
+    save_json(tmp_path/'views.json',[{'file':'front.png','azimuth_deg':0,'elevation_deg':0},{'file':'top.png','azimuth_deg':0,'elevation_deg':90}])
+    report=align([{'prepared':str(tmp_path/'reference.png')}],tmp_path)
+    assert report['pairs'][0]['render']=='front.png'
+    assert report['silhouette_iou']<.4
+
+
+def test_retry_photos_are_not_holdout_evidence():
+    def report(values):
+        return {'pairs':[{'reference_index':i,'iou':v,'used_for_generation':i in (0,1,2)} for i,v in enumerate(values)]}
+    # Improved on every attempted photo, worse on the only unseen photo.
+    assert not acceptance(report([.5,.5,.5,.8]),report([.9,.9,.9,.7]))[0]
+    assert not acceptance(report([.5,.5,.5]),report([.9,.9,.9]))[0]

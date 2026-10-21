@@ -33,7 +33,7 @@ def iou(a, b):
 
 def align(references, render_dir, fixed_pairs=None):
     render_dir = Path(render_dir)
-    views = json.loads((render_dir / "views.json").read_text())
+    views = [v for v in json.loads((render_dir / "views.json").read_text()) if v["elevation_deg"] != 90]
     render_masks = {v['file']: normalized_mask(render_dir / v['file']) for v in views}
     ref_masks = [normalized_mask(r['prepared']) for r in references]
     if fixed_pairs is not None:
@@ -72,7 +72,7 @@ def acceptance(before, after, margin=0.005):
     def scores(report):
         return {p['reference_index']:p['iou'] for p in report['pairs']}
     a, b = scores(before), scores(after)
-    holdout = [i for i in a if i != 0]
+    holdout = [p['reference_index'] for p in before['pairs'] if not p.get('used_for_generation',p['reference_index']==0)]
     if not holdout:
         return False, "Нет проверочных ракурсов"
     delta = float(np.mean([b[i]-a[i] for i in holdout]))

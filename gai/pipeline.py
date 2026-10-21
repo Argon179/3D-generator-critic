@@ -15,6 +15,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from gai.core import ROOT, RUNS, Cancelled, command, config, event, local_path, read_run, run_dir, save_json, update_run
 from gai.metrics import align, acceptance
+from gai.geometry import geometry_report, enforce_geometry_warning
 
 
 class Critique(BaseModel):
@@ -71,7 +72,7 @@ def canonical_mesh(source, destination, max_faces):
     scale=2/span
     mesh.vertices=(mesh.vertices-center)*scale
     mesh.export(destination)
-    return {'vertices':len(mesh.vertices),'faces':len(mesh.faces),'source_center':center.tolist(),'source_scale':float(scale),'canonical_up':'Y','removed_fragment_faces':removed,'can_deform':mesh.body_count==1,'materials':'clay comparison; source GLB retains original materials'}
+    return {'vertices':len(mesh.vertices),'faces':len(mesh.faces),'source_center':center.tolist(),'source_scale':float(scale),'canonical_up':'Y','removed_fragment_faces':removed,'can_deform':mesh.body_count==1,'geometry':geometry_report(mesh),'materials':'clay comparison; source GLB retains original materials'}
 
 
 def validate_candidate(path):
@@ -95,13 +96,19 @@ def criticize(run_id, folder, refs, metrics, prompt, cfg):
     for i in indexes:
         p=pairs[i]
         selected.append({'reference_index':p['reference_index'],'reference':refs[p['reference_index']]['prepared'],'render':str(folder/'renders'/p['render'])})
+    views=json.loads((folder/'renders/views.json').read_text())
+    audit=[dict(v,path=str(folder/'renders'/v['file'])) for v in views if v['azimuth_deg'] in (0,90,180,270) and v['elevation_deg']==0]
+    top=next((v for v in views if v['elevation_deg']==90),None)
+    if top:audit.append(dict(top,path=str(folder/'renders'/top['file'])))
+    geometry=metrics.get('geometry',{})
     job=folder/'critic_job.json'
-    save_json(job,{'model':cfg['qwen_model'],'revision':cfg.get('qwen_revision'),'pairs':selected,'base_description':prompt,'out':str(folder)})
+    save_json(job,{'model':cfg['qwen_model'],'revision':cfg.get('qwen_revision'),'pairs':selected,'audit_views':audit,'geometry':geometry,'base_description':prompt,'out':str(folder)})
     command(run_id,[local_path(cfg['qwen_python']),ROOT/'gai/workers/qwen_worker.py',job])
     data=json.loads((folder/'critique.json').read_text())
     # The CLIP source is the caller's fixed description, not a fresh description
     # of the desired reference that the VLM may accidentally repeat as both ends.
     data['base_description']=prompt
+    if geometry:data=enforce_geometry_warning(data,geometry)
     critique=Critique.model_validate(data)
     save_json(folder/'critique.json',dict(critique.model_dump(),peak_vram_mb=data.get('peak_vram_mb')))
     return critique
@@ -133,6 +140,11 @@ def execute(run_id):
         save_json(job,{'repo':str(local_path(cfg['sf3d_repo'])),'model':cfg['sf3d_model'],'revision':cfg.get('sf3d_revision'),'seed':params['seed'],'out':str(initial),'references':refs,'background':params['background']})
         command(run_id,[local_path(cfg['sf3d_python']),ROOT/'gai/workers/sf3d_worker.py',job])
         refs=json.loads((initial/'references.json').read_text())
+        quality_file=initial/'generation_quality.json'
+        if quality_file.exists():
+            quality=json.loads(quality_file.read_text())
+            if len(quality['candidates'])>1:
+                event(run_id,f"SF3D: проверено {len(quality['candidates'])} отдельных ракурсов; выбран №{quality['selected_reference_index']} по эвристике толщины. Это не оценка точности 3D.")
         meta=canonical_mesh(initial/'generated.glb',initial/'mesh.obj',cfg['max_faces']);save_json(initial/'mesh_info.json',meta)
         mesh=initial/'mesh.obj';baseline_pairs=None;iterations=[];current_description=params['prompt']
         update_run(run_id,preview_mesh=str(mesh.relative_to(ROOT)),source_glb=str((initial/'generated.glb').relative_to(ROOT)))
@@ -142,6 +154,12 @@ def execute(run_id):
             event(run_id,f'Итерация {number}: EEVEE, фиксированная камера и clay-материал')
             render(run_id,mesh,current,cfg)
             report=align(refs,current/'renders',baseline_pairs)
+            for pair in report['pairs']:
+                pair['used_for_generation']=refs[pair['reference_index']].get('used_for_generation',pair['reference_index']==0)
+                pair['reference_path']=str(Path(refs[pair['reference_index']]['prepared']).relative_to(ROOT)) if Path(refs[pair['reference_index']]['prepared']).is_absolute() else refs[pair['reference_index']]['prepared']
+            views=json.loads((current/'renders/views.json').read_text()) if (current/'renders/views.json').exists() else []
+            report['audit_views']=[dict(v,path=str((current/'renders'/v['file']).relative_to(ROOT))) for v in views if (v['azimuth_deg'] in (0,90,180,270) and v['elevation_deg']==0) or v['elevation_deg']==90]
+            report['geometry']=geometry_report(trimesh.load(mesh,force='mesh',process=False))
             save_json(current/'metrics.json',report)
             if baseline_pairs is None:baseline_pairs=report['pairs']
             update_run(run_id,stage='critique')
@@ -150,6 +168,8 @@ def execute(run_id):
             if number:
                 accepted,reason=acceptance(previous_report,report,cfg['acceptance_margin'])
                 if critique.camera_mismatch:accepted=False;reason+='; критик обнаружил несогласование камеры'
+                if report['geometry']['severity']!='none' and report['geometry']['thickness_ratio']<previous_report['geometry']['thickness_ratio']:
+                    accepted=False;reason+='; усилилась плоскостность сетки'
             item={'number':number,'path':str(current.relative_to(ROOT)),'mesh':str(mesh.relative_to(ROOT)),'metrics':report,'critique':critique.model_dump(),'accepted':accepted,'decision':reason}
             iterations.append(item);update_run(run_id,iterations=iterations)
             event(run_id,reason)
@@ -163,6 +183,8 @@ def execute(run_id):
             stop_reason=None
             if number>=params['iterations']:
                 stop_reason='Достигнут выбранный лимит итераций'
+            elif report['geometry']['severity']!='none':
+                stop_reason='Автоправка пропущена: обнаружена малая толщина. Нужна проверка объёма и повторная генерация.'
             elif critique.camera_mismatch:
                 stop_reason='Правка пропущена: критик указал несогласование камеры'
             elif not critique.should_edit:

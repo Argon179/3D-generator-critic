@@ -46,8 +46,8 @@ def main():
     camera=bpy.data.cameras.new('Camera');cam=bpy.data.objects.new('Camera',camera);scene.collection.objects.link(cam);scene.camera=cam
     camera.type='ORTHO';camera.ortho_scale=3.1;camera.lens=50
     out=Path(job['out']);out.mkdir(parents=True,exist_ok=True);views=[]
-    for elev in job['elevations']:
-        for az in range(0,360,job['step']):
+    for elev in sorted(set(job['elevations']) | {0,90}):
+        for az in ([0] if elev==90 else sorted(set(range(0,360,job['step'])) | {0,90,180,270})):
             a=math.radians(az);e=math.radians(elev)
             cam.location=Vector((5*math.sin(a)*math.cos(e),-5*math.cos(a)*math.cos(e),5*math.sin(e)))
             cam.rotation_euler=(-cam.location).to_track_quat('-Z','Y').to_euler()
