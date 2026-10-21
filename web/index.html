@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>GAI · 3D Loop</title><link rel="stylesheet" href="/style.css"><link rel="icon" href="/favicon.svg" type="image/svg+xml"></head>
+<body>
+<header><a class="brand" href="/">◈ <strong>GAI</strong><span>3D LOOP</span></a><div class="models">SF3D <i>→</i> EEVEE <i>→</i> QWEN <i>→</i> TEXTDEFORMER</div><button id="healthButton" class="ghost">Окружение <span id="healthDot">●</span></button></header>
+<main>
+<aside>
+<div class="eyebrow">01 / РЕФЕРЕНСЫ</div><h1>От снимков<br>к объёму.</h1><p class="muted">Один объект. Несколько ракурсов.<br>Проверяем каждое изменение.</p>
+<label>Объект<select id="dataset"></select></label><div id="warning" class="warning"></div>
+<div class="ref-heading"><span>Ракурсы для проверки</span><label class="upload">+ Свои фото<input id="upload" type="file" multiple accept="image/png,image/jpeg,image/webp" hidden></label></div>
+<div id="references" class="references"></div><p class="hint">Галочка — использовать ракурс. Кружок — фото для SF3D. Для генерации лучше выбрать вид в три четверти. Нужно минимум два изображения.</p>
+<label>Описание объекта на английском<input id="prompt" placeholder="a yellow rubber duck" maxlength="200"></label>
+<div class="form-row"><label>Фон<select id="background"><option value="black">Удалить чёрный</option><option value="rembg">Автоматически · U²-Net</option><option value="white">Удалить белый</option><option value="alpha">Уже прозрачный</option></select></label><label>Правок<select id="iterations"><option value="0">Только оценка</option><option value="1" selected>До 1</option><option value="2">До 2</option><option value="3">До 3</option></select></label></div>
+<details><summary>Дополнительные параметры</summary><label>Seed<input id="seed" type="number" min="0" max="2147483647" value="42"></label><label>Общая область объекта · x,y,w,h<input id="crop" placeholder="Например: 0.25,0.2,0.5,0.5"></label><p class="hint">Координаты от 0 до 1. Одна область применяется ко всем фото. Для движущейся детали лучше заранее подготовить отдельные маски.</p></details>
+<button id="start" class="primary">Создать модель <span>↗</span></button><div id="formError" class="error"></div>
+<div class="aside-note">SF3D получает одно фото. Остальные виды проверяют форму. TextDeformer экспериментальный: улучшение не гарантировано.</div>
+</aside>
+<section class="workspace">
+<div class="workspace-heading"><div><div class="eyebrow">02 / ЭКСПЕРИМЕНТ</div><h2 id="runTitle">Рабочая область</h2></div><div class="toolbar"><select id="history"><option value="">История запусков</option></select><button id="cancel" class="ghost" hidden>Остановить</button></div></div>
+<div class="steps" id="steps"><span data-stage="generate">1 Генерация</span><span data-stage="render">2 Рендеры</span><span data-stage="critique">3 Критика</span><span data-stage="edit">4 Правка</span></div>
+<div id="empty" class="empty"><div class="orb">◈</div><h2>Форма рождается в итерациях</h2><p>Выберите объект и запустите эксперимент.<br>Здесь появятся модель, сравнения и замечания критика.</p><div class="tags"><span>Локально</span><span>4-bit VLM</span><span>История правок</span></div></div>
+<div id="runContent" hidden><div class="status-line"><span id="status" class="badge"></span><span id="stageText" class="muted"></span><a id="logLink" target="_blank">Журнал ↗</a></div><div id="runError" class="error"></div>
+<div id="iterationTabs" class="tabs"></div>
+<div class="viewer-card"><div class="card-top"><span id="meshLabel">Геометрия · обзор</span><div><a id="sourceDownload" class="ghost" hidden>Исходная SF3D ↓</a> <a id="download" class="ghost" hidden>Лучший GLB ↓</a></div></div><canvas id="meshCanvas"></canvas><p class="hint">Перетащите для вращения · колесо для масштаба. Просмотр показывает геометрию; исходный GLB SF3D содержит текстуры.</p></div>
+<div class="results-grid"><article class="card"><div class="eyebrow">КРИТИК / QWEN3-VL</div><h3 id="summary">Ожидаем оценку</h3><div id="issues"></div><div id="decision"></div></article><article class="card"><div class="eyebrow">ПРОВЕРКА / СИЛУЭТЫ</div><div class="metric" id="metric">—</div><p class="hint">Средний IoU нормированных силуэтов. Камера подобрана приблизительно. Оценка не подтверждает точность 3D.</p><div id="target" class="target"></div></article></div>
+<div class="card"><div class="card-top"><span>Референс / соответствующий рендер</span><span class="hint">Камеры фиксируются после исходной модели</span></div><div id="comparisons" class="comparisons"></div></div></div>
+<details class="activity" open><summary>События запуска</summary><div id="events"><span class="muted">Пока нет событий</span></div></details>
+</section>
+</main>
+<dialog id="health"><div class="card-top"><h2>Окружение</h2><button id="closeHealth" class="ghost">✕</button></div><div id="healthChecks"></div><p class="hint">SF3D требует принятия условий Hugging Face. Проверка импортов не подтверждает наличие весов.</p><button id="refreshHealth" class="ghost">Проверить снова</button></dialog>
+<script src="/app.js"></script></body></html>

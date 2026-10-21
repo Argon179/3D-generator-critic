@@ -1,0 +1,17 @@
+[project]
+name = "gai-3d-loop"
+version = "0.1.0"
+description = "Local photo-to-mesh generator, visual critic and mesh editor"
+requires-python = ">=3.10"
+dependencies = ["fastapi>=0.115,<1", "uvicorn>=0.34,<1", "pydantic>=2.10,<3", "python-multipart>=0.0.20", "numpy>=1.26,<2", "Pillow>=10,<12", "trimesh>=4.6,<5", "scipy>=1.11,<1.16"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+
+[tool.setuptools]
+packages = ["gai", "gai.workers"]

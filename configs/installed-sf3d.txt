@@ -1,0 +1,34 @@
+antlr4-python3-runtime==4.9.3
+einops==0.7.0
+flatbuffers==25.12.19
+ftfy==6.3.1
+gpytoolbox==0.3.7
+huggingface-hub==0.23.4
+ImageIO==2.38.1
+jaxtyping==0.2.31
+lazy-loader==0.6
+llvmlite==0.50.0
+ninja==1.13.2
+numba==0.68.0
+numpy==1.26.4
+omegaconf==2.3.0
+onnxruntime==1.31.0
+open-clip-torch==2.24.0
+opencv-python-headless==4.11.0.86
+pooch==1.9.0
+protobuf==7.36.2
+PyMatting==1.1.16
+pynanoinstantmeshes==0.0.3
+regex==2026.9.29
+rembg==2.0.57
+scikit-image==0.26.0
+scipy==1.15.0
+scs==3.3.1
+sentencepiece==0.2.2
+texture_baker @ file:///home/msi/%D0%A0%D0%B0%D0%B1%D0%BE%D1%87%D0%B8%D0%B9%20%D1%81%D1%82%D0%BE%D0%BB/%D0%A3%D1%87%D1%91%D0%B1%D0%B0/GAI/vendor/stable-fast-3d/texture_baker
+tifffile==2026.3.3
+tokenizers==0.19.1
+transformers==4.42.3
+trimesh==4.4.1
+typeguard==2.13.3
+uv_unwrapper @ file:///home/msi/%D0%A0%D0%B0%D0%B1%D0%BE%D1%87%D0%B8%D0%B9%20%D1%81%D1%82%D0%BE%D0%BB/%D0%A3%D1%87%D1%91%D0%B1%D0%B0/GAI/vendor/stable-fast-3d/uv_unwrapper

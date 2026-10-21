@@ -1,0 +1,74 @@
+[
+  {
+    "file": "figurines/01_rubber_duck.jpg",
+    "label": "Резиновая уточка",
+    "note": "Простой силуэт; однотонная стена и поверхность.",
+    "source": "https://commons.wikimedia.org/wiki/File:1_Yellow_rubber_duck.jpg",
+    "download_url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/e/e0/1_Yellow_rubber_duck.jpg/500px-1_Yellow_rubber_duck.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+    "author": "Pieter de derde",
+    "license": "CC BY-SA 4.0",
+    "license_url": "https://creativecommons.org/licenses/by-sa/4.0",
+    "width": 500,
+    "height": 667
+  },
+  {
+    "file": "figurines/02_chess_pawn.jpg",
+    "label": "Шахматная пешка",
+    "note": "Простая осесимметричная форма; шахматный фон желательно удалить.",
+    "source": "https://commons.wikimedia.org/wiki/File:Chess_piece_-_White_pawn.JPG",
+    "download_url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/e/ed/Chess_piece_-_White_pawn.JPG/500px-Chess_piece_-_White_pawn.JPG?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+    "author": "MichaelMaggs",
+    "license": "CC BY-SA 2.5",
+    "license_url": "https://creativecommons.org/licenses/by-sa/2.5",
+    "width": 500,
+    "height": 861
+  },
+  {
+    "file": "figurines/03_chess_rook.jpg",
+    "label": "Шахматная ладья",
+    "note": "Наиболее удобный референс: отдельная фигура на светлом фоне.",
+    "source": "https://commons.wikimedia.org/wiki/File:White_rook.jpg",
+    "download_url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/3/30/White_rook.jpg/500px-White_rook.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+    "author": "\n\nThis image was produced by me, David Castor (user:dcastor). The pictures I submit to the Wikipedia Project are released to the public domain. This gives you the right to use them in any way you like, without any kind of notification. This said, I would still appreciate to be mentioned as the originator whenever you think it complies well with your use of the picture. A message to me  about how it has been used would also be welcome. You are obviously not required to respond to these wishes of mine, just in a friendly manner encouraged to. (All my photos are placed in Category:Images by David Castor or a subcategory thereof.)\n\n\n\n\n\n",
+    "license": "CC0",
+    "license_url": "http://creativecommons.org/publicdomain/zero/1.0/deed.en",
+    "width": 500,
+    "height": 792
+  },
+  {
+    "file": "figurines/04_turtle.jpg",
+    "label": "Фигурка черепахи",
+    "note": "Простой объём; музейный фон и этикетка усложняют выделение объекта.",
+    "source": "https://commons.wikimedia.org/wiki/File:Turtle_figurine,_perhaps_toy,_5th_c_BC,_MCA,_225435.jpg",
+    "download_url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/1/1a/Turtle_figurine%2C_perhaps_toy%2C_5th_c_BC%2C_MCA%2C_225435.jpg/500px-Turtle_figurine%2C_perhaps_toy%2C_5th_c_BC%2C_MCA%2C_225435.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+    "author": "Zde",
+    "license": "CC BY-SA 4.0",
+    "license_url": "https://creativecommons.org/licenses/by-sa/4.0",
+    "width": 500,
+    "height": 375
+  },
+  {
+    "file": "engineering/01_spur_gears.jpg",
+    "label": "Прямозубые шестерни",
+    "note": "На фотографии ДВА сцепленных колеса. Для генерации одного колеса необходимо отдельно выделить выбранную шестерню; часть зубьев в зацеплении скрыта.",
+    "source": "https://commons.wikimedia.org/wiki/File:Stirnraeder.JPG",
+    "download_url": "https://upload.wikimedia.org/wikipedia/commons/1/1b/Stirnraeder.JPG?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail_unscaled",
+    "author": "Honina",
+    "license": "CC BY-SA 3.0",
+    "license_url": "http://creativecommons.org/licenses/by-sa/3.0/",
+    "width": 292,
+    "height": 176
+  },
+  {
+    "file": "engineering/02_hex_nut.jpg",
+    "label": "Шестигранная гайка",
+    "note": "Одна деталь; видны отверстие, толщина и грани. Резьба — усложнённый тест.",
+    "source": "https://commons.wikimedia.org/wiki/File:Hex_nut.JPG",
+    "download_url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/6/63/Hex_nut.JPG/500px-Hex_nut.JPG?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+    "author": "Plbcr",
+    "license": "CC BY-SA 3.0",
+    "license_url": "https://creativecommons.org/licenses/by-sa/3.0",
+    "width": 500,
+    "height": 375
+  }
+]

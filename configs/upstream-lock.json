@@ -1,0 +1,7 @@
+{
+  "stable-fast-3d": {"url":"https://github.com/Stability-AI/stable-fast-3d", "commit":"ff21fc491b4dc5314bf6734c7c0dabd86b5f5bb2"},
+  "TextDeformer": {"url":"https://github.com/threedle/TextDeformer", "commit":"f5302c66c0e5cbbd2fde3ad2aac2aec8f842924c"},
+  "CLIP": {"url":"https://github.com/openai/CLIP", "commit":"b46f5ac7587d2e1862f8b7b1573179d80dcdd620"},
+  "nvdiffrast": {"url":"https://github.com/NVlabs/nvdiffrast", "commit":"78528e683210dfaa1be57e3c65aa37d3b36c6644"},
+  "Blender": {"version":"4.5.14", "url":"https://download.blender.org/release/Blender4.5/blender-4.5.14-linux-x64.tar.xz"}
+}

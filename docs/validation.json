@@ -1,0 +1,32 @@
+{
+  "run_id": "8a70425d2fba",
+  "url": "http://127.0.0.1:7860/?run=8a70425d2fba",
+  "reference_count": 5,
+  "generation_azimuth_deg": 300,
+  "stages": [
+    "Stable Fast 3D",
+    "Blender EEVEE",
+    "Qwen3-VL-4B-Instruct NF4",
+    "TextDeformer 150 steps",
+    "EEVEE + Qwen repeated"
+  ],
+  "sf3d_peak_allocated_mib": 6167.30859375,
+  "qwen_peak_allocated_mib": 3030.12841796875,
+  "textdeformer": {
+    "elapsed_seconds": 23.746290862999558,
+    "peak_vram_mb": 1945.1474609375,
+    "epochs": 150
+  },
+  "initial_mean_silhouette_iou": 0.786555327156545,
+  "candidate_mean_silhouette_iou": 0.7861855523903456,
+  "edit_accepted": false,
+  "decision": "Δ IoU проверочных видов: +0.0067; худший: -0.0403; критик обнаружил несогласование камеры",
+  "best_glb_preserved": true,
+  "best_vs_initial_max_nearest_vertex_distance": 4.2344233596027005e-08,
+  "test_count": 16,
+  "notes": [
+    "Qwen format was refined during this development run; original initial critique is preserved in iteration_00/*.initial.",
+    "Scores use approximate camera matching and normalized masks; they are not a 3D accuracy benchmark.",
+    "Allocated VRAM measurements are from PyTorch, not total driver memory."
+  ]
+}

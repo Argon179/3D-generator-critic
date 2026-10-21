@@ -1,0 +1,21 @@
+{
+  "blender": "tools/blender",
+  "sf3d_python": ".venvs/sf3d/bin/python",
+  "qwen_python": ".venvs/qwen/bin/python",
+  "textdeformer_python": ".venvs/textdeformer/bin/python",
+  "sf3d_repo": "vendor/stable-fast-3d",
+  "textdeformer_repo": "vendor/TextDeformer",
+  "qwen_model": "Qwen/Qwen3-VL-4B-Instruct",
+  "sf3d_model": "stabilityai/stable-fast-3d",
+  "sf3d_revision": "f0c9a8ffd62cb1bbc8a7a53c9f87a0be1b6be778",
+  "qwen_revision": "ebb281ec70b05090aa6165b016eac8ec08e71b17",
+  "render_resolution": 384,
+  "render_step_deg": 30,
+  "render_elevations": [0, 20, 40],
+  "critic_pairs": 3,
+  "textdeformer_epochs": 150,
+  "textdeformer_batch_size": 2,
+  "textdeformer_train_res": 224,
+  "max_faces": 12000,
+  "acceptance_margin": 0.005
+}

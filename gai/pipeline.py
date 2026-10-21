@@ -1,0 +1,192 @@
+from __future__ import annotations
+
+import fcntl
+import json
+import math
+import shutil
+import sys
+import traceback
+import re
+from pathlib import Path
+
+import numpy as np
+import trimesh
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+from gai.core import ROOT, RUNS, Cancelled, command, config, event, local_path, read_run, run_dir, save_json, update_run
+from gai.metrics import align, acceptance
+
+
+class Critique(BaseModel):
+    model_config=ConfigDict(extra='ignore')
+    summary_ru: str=Field(max_length=2000)
+    camera_mismatch: bool
+    confidence: float=Field(ge=0,le=1)
+    should_edit: bool
+    issues: list[dict]=Field(default_factory=list,max_length=10)
+    base_description: str=Field(min_length=3,max_length=250)
+    target_description: str=Field(min_length=3,max_length=250)
+
+    @field_validator('base_description','target_description')
+    @classmethod
+    def short_clip_prompt(cls,v):
+        # CLIP has a 77-token context; conservative character bound is also checked with CLIP by worker.
+        if '\n' in v:raise ValueError('Описание должно быть одной строкой')
+        return v.strip()
+
+    @model_validator(mode='after')
+    def consistent_edit(self):
+        if self.camera_mismatch or not self.issues:
+            self.should_edit=False
+        if not self.should_edit:
+            self.target_description=self.base_description
+        return self
+
+
+def canonical_mesh(source, destination, max_faces):
+    mesh=trimesh.load(source,force='mesh',process=True)
+    if not isinstance(mesh,trimesh.Trimesh) or len(mesh.faces)<4 or not np.isfinite(mesh.vertices).all():
+        raise ValueError('Некорректная или пустая сетка')
+    # GLB UV seams duplicate vertices. TextDeformer's Poisson solve needs actual
+    # geometric connectivity, so weld geometry independently of UVs/normals.
+    mesh.visual=trimesh.visual.ColorVisuals(mesh)
+    mesh.merge_vertices(merge_tex=True,merge_norm=True)
+    mesh.update_faces(mesh.nondegenerate_faces())
+    mesh.remove_unreferenced_vertices()
+    if len(mesh.faces)<4:raise ValueError('После удаления вырожденных граней сетка пуста')
+    components=mesh.split(only_watertight=False)
+    removed=0
+    if len(components)>1:
+        largest=max(components,key=lambda p:len(p.faces))
+        if len(largest.faces)/len(mesh.faces)>=.98:
+            removed=len(mesh.faces)-len(largest.faces)
+            mesh=largest
+    if len(mesh.faces)>max_faces:
+        # Avoid a heavy sparse solve for a 100k-face SF3D result.
+        try:mesh=mesh.simplify_quadric_decimation(face_count=max_faces)
+        except ImportError as e:raise RuntimeError('Установите fast-simplification в базовое окружение') from e
+    center=mesh.bounds.mean(axis=0)
+    span=float(np.ptp(mesh.vertices,axis=0).max())
+    if span<=1e-8:raise ValueError('Размер сетки равен нулю')
+    scale=2/span
+    mesh.vertices=(mesh.vertices-center)*scale
+    mesh.export(destination)
+    return {'vertices':len(mesh.vertices),'faces':len(mesh.faces),'source_center':center.tolist(),'source_scale':float(scale),'canonical_up':'Y','removed_fragment_faces':removed,'can_deform':mesh.body_count==1,'materials':'clay comparison; source GLB retains original materials'}
+
+
+def validate_candidate(path):
+    mesh=trimesh.load(path,force='mesh',process=False)
+    if not isinstance(mesh,trimesh.Trimesh) or not np.isfinite(mesh.vertices).all() or len(mesh.faces)<4:
+        raise ValueError('Редактор вернул некорректную сетку')
+    if np.ptp(mesh.vertices,axis=0).max()>6:
+        raise ValueError('Сильная деформация: размер сетки вышел за допустимый предел')
+
+
+def render(run_id, mesh, folder, cfg):
+    job=folder/'render_job.json'
+    save_json(job,{'mesh':str(mesh),'out':str(folder/'renders'),'resolution':cfg['render_resolution'],'step':cfg['render_step_deg'],'elevations':cfg['render_elevations']})
+    command(run_id,[local_path(cfg['blender']),'--background','--factory-startup','--python',ROOT/'scripts/blender_render.py','--',job],timeout=1800)
+
+
+def criticize(run_id, folder, refs, metrics, prompt, cfg):
+    # Include held-out views, not just the image that generated the mesh.
+    pairs=metrics['pairs'];indexes=np.linspace(0,len(pairs)-1,min(cfg['critic_pairs'],len(pairs)),dtype=int)
+    selected=[]
+    for i in indexes:
+        p=pairs[i]
+        selected.append({'reference_index':p['reference_index'],'reference':refs[p['reference_index']]['prepared'],'render':str(folder/'renders'/p['render'])})
+    job=folder/'critic_job.json'
+    save_json(job,{'model':cfg['qwen_model'],'revision':cfg.get('qwen_revision'),'pairs':selected,'base_description':prompt,'out':str(folder)})
+    command(run_id,[local_path(cfg['qwen_python']),ROOT/'gai/workers/qwen_worker.py',job])
+    data=json.loads((folder/'critique.json').read_text())
+    # The CLIP source is the caller's fixed description, not a fresh description
+    # of the desired reference that the VLM may accidentally repeat as both ends.
+    data['base_description']=prompt
+    critique=Critique.model_validate(data)
+    save_json(folder/'critique.json',dict(critique.model_dump(),peak_vram_mb=data.get('peak_vram_mb')))
+    return critique
+
+
+def edit(run_id,mesh,folder,critique,cfg):
+    job=folder/'edit_job.json'
+    save_json(job,{'repo':str(local_path(cfg['textdeformer_repo'])),'mesh':str(mesh),'out':str(folder/'textdeformer'),'base_description':critique.base_description,'target_description':critique.target_description,'epochs':cfg['textdeformer_epochs'],'batch_size':cfg['textdeformer_batch_size'],'train_res':cfg['textdeformer_train_res']})
+    command(run_id,[local_path(cfg['textdeformer_python']),ROOT/'gai/workers/edit_worker.py',job],cwd=local_path(cfg['textdeformer_repo']),timeout=7200)
+    candidate=folder/'textdeformer/mesh_final/mesh.obj'
+    validate_candidate(candidate)
+    return candidate
+
+
+def execute(run_id):
+    folder=run_dir(run_id)
+    cfg=read_run(run_id).get('config') or config()
+    lock=(RUNS/'.gpu.lock').open('w')
+    try:
+        fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
+    except BlockingIOError:
+        update_run(run_id,status='failed',error='GPU занята другим процессом проекта');lock.close();return
+    try:
+        state=read_run(run_id);params=state['parameters'];refs=state['references']
+        update_run(run_id,status='running',stage='generate')
+        initial=folder/'iteration_00';initial.mkdir(exist_ok=True)
+        event(run_id,'SF3D: подготовка масок и генерация по первому выбранному изображению')
+        job=folder/'generation_job.json'
+        save_json(job,{'repo':str(local_path(cfg['sf3d_repo'])),'model':cfg['sf3d_model'],'revision':cfg.get('sf3d_revision'),'seed':params['seed'],'out':str(initial),'references':refs,'background':params['background']})
+        command(run_id,[local_path(cfg['sf3d_python']),ROOT/'gai/workers/sf3d_worker.py',job])
+        refs=json.loads((initial/'references.json').read_text())
+        meta=canonical_mesh(initial/'generated.glb',initial/'mesh.obj',cfg['max_faces']);save_json(initial/'mesh_info.json',meta)
+        mesh=initial/'mesh.obj';baseline_pairs=None;iterations=[];current_description=params['prompt']
+        update_run(run_id,preview_mesh=str(mesh.relative_to(ROOT)),source_glb=str((initial/'generated.glb').relative_to(ROOT)))
+        for number in range(params['iterations']+1):
+            current=folder/f'iteration_{number:02d}';current.mkdir(exist_ok=True)
+            update_run(run_id,stage='render',iteration=number)
+            event(run_id,f'Итерация {number}: EEVEE, фиксированная камера и clay-материал')
+            render(run_id,mesh,current,cfg)
+            report=align(refs,current/'renders',baseline_pairs)
+            save_json(current/'metrics.json',report)
+            if baseline_pairs is None:baseline_pairs=report['pairs']
+            update_run(run_id,stage='critique')
+            critique=criticize(run_id,current,refs,report,current_description,cfg)
+            accepted=True;reason='Исходная модель'
+            if number:
+                accepted,reason=acceptance(previous_report,report,cfg['acceptance_margin'])
+                if critique.camera_mismatch:accepted=False;reason+='; критик обнаружил несогласование камеры'
+            item={'number':number,'path':str(current.relative_to(ROOT)),'mesh':str(mesh.relative_to(ROOT)),'metrics':report,'critique':critique.model_dump(),'accepted':accepted,'decision':reason}
+            iterations.append(item);update_run(run_id,iterations=iterations)
+            event(run_id,reason)
+            if accepted:
+                best_mesh=mesh
+                # Standalone geometry export, independent of TextDeformer sidecar files.
+                trimesh.load(best_mesh,force='mesh',process=False).export(folder/'best.glb')
+                update_run(run_id,best_mesh=str((folder/'best.glb').relative_to(ROOT)))
+            if not accepted:
+                event(run_id,'Правка отклонена; сохранён предыдущий результат');break
+            stop_reason=None
+            if number>=params['iterations']:
+                stop_reason='Достигнут выбранный лимит итераций'
+            elif critique.camera_mismatch:
+                stop_reason='Правка пропущена: критик указал несогласование камеры'
+            elif not critique.should_edit:
+                stop_reason='Критик не запросил изменение геометрии'
+            elif critique.confidence<0.65:
+                stop_reason='Правка пропущена: низкая уверенность критика'
+            if stop_reason:
+                event(run_id,stop_reason);break
+            if not meta['can_deform']:
+                event(run_id,'Редактирование пропущено: несколько крупных несвязных частей. Требуется подготовка связной сетки.');break
+            if re.findall(r'\w+',critique.target_description.casefold())==re.findall(r'\w+',critique.base_description.casefold()):
+                event(run_id,'Правка пропущена: одинаковые исходное и целевое описания');break
+            update_run(run_id,stage='edit')
+            event(run_id,'TextDeformer: '+critique.target_description)
+            next_folder=folder/f'iteration_{number+1:02d}';next_folder.mkdir(exist_ok=True)
+            previous_report=report
+            mesh=edit(run_id,mesh,next_folder,critique,cfg)
+            current_description=critique.target_description
+        update_run(run_id,status='completed',stage='done')
+        event(run_id,'Запуск завершён. Исходные изображения и все промежуточные результаты сохранены.')
+    except Cancelled:
+        update_run(run_id,status='cancelled',stage='stopped');event(run_id,'Запуск остановлен')
+    except Exception as exc:
+        (folder/'error.txt').write_text(traceback.format_exc())
+        update_run(run_id,status='failed',error=str(exc));event(run_id,str(exc))
+    finally:
+        fcntl.flock(lock,fcntl.LOCK_UN);lock.close()
