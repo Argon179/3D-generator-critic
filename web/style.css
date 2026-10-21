@@ -5,3 +5,9 @@
 .stage-toolbar{display:flex;gap:14px;align-items:end;flex-wrap:wrap;margin:16px 0}.stage-toolbar label{flex:1;min-width:190px}.stage-images{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:12px}.stage-images figure{margin:12px 0}.stage-images img{width:100%;background:#eee}.stage-images figcaption{font-size:10px;overflow-wrap:anywhere}.stage-files{display:flex;flex-direction:column;gap:8px;margin:18px 0;font-size:12px}#stageJson{white-space:pre-wrap;overflow-wrap:anywhere;font-size:11px;max-height:550px;overflow:auto}.metric-details{font-size:12px;line-height:1.8;color:var(--muted)}
 
 .metric{font-size:40px}
+
+/* Side labels belong to the photo, outside the thumbnail overlay. */
+.ref .view-role{position:relative;inset:auto;display:block;width:100%;font-size:11px;padding:6px 2px;margin-top:5px;z-index:1;box-sizing:border-box}
+.ref .view-role[hidden]{display:none}
+
+.references.marking{grid-template-columns:repeat(3,minmax(0,1fr))}.references.marking .ref{height:auto}.references.marking .ref img{display:block;height:80px}.references.marking .ref input[type=radio]{bottom:auto;top:62px}.references.marking .view-role{border-radius:0;margin:0;padding:7px 1px;border:0;border-top:1px solid var(--line);font-size:10px}

@@ -52,3 +52,29 @@ def test_existing_run_stage_inventory_and_glb_preview():
     preview=client.get(f'/api/runs/{ident}/preview',params={'artifact':generated})
     assert preview.status_code==200 and '\nv ' in preview.text and '\nf ' in preview.text
     assert client.get(f'/api/runs/{ident}/preview',params={'artifact':'runs/../configs/project.json'}).status_code==404
+
+
+def test_manual_sides_accept_three_photos_without_known_angles(tmp_path,monkeypatch):
+    import gai.server as server
+    import gai.core as core
+    from PIL import Image
+    from types import SimpleNamespace
+    monkeypatch.setattr(core,'RUNS',tmp_path/'runs')
+    monkeypatch.setattr(server,'ROOT',tmp_path)
+    images=[]
+    for index in range(3):
+        path=tmp_path/f'photo_{index}.png';Image.new('RGBA',(8,8)).save(path)
+        images.append({'path':path.name,'azimuth_deg':None})
+    monkeypatch.setattr(server,'library',lambda:[{'id':'manual','name':'Manual photos','images':images}])
+    monkeypatch.setattr(server,'weight_checks',lambda:[])
+    monkeypatch.setattr(core,'multiview_checks',lambda backend:[])
+    submitted=[]
+    monkeypatch.setattr(server,'executor',SimpleNamespace(submit=lambda *args:submitted.append(args)))
+    result=TestClient(app).post('/api/runs',json={'dataset_id':'manual','image_indexes':[0,1,2],
+        'generation_index':0,'prompt':'a rubber duck','generator':'hunyuan','background':'alpha',
+        'view_sides':{'front':0,'left':1}})
+    assert result.status_code==200,result.text
+    state=result.json()
+    assert state['parameters']['view_sides']=={'front':0,'left':1}
+    assert all(r['azimuth_deg'] is None for r in state['references'])
+    assert len(submitted)==1 and state['status']=='queued'

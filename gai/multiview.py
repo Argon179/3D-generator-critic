@@ -15,7 +15,7 @@ def select_views(refs, backend, explicit=None):
                 raise ValueError('Каждая сторона должна ссылаться на отдельное выбранное фото')
         else:
             if len(refs) < 5 or any(r.get('azimuth_deg') is None for r in refs):
-                raise ValueError('Укажите стороны вручную или выберите минимум 5 фото с известными азимутами')
+                raise ValueError('Назначьте стороны под фотографиями: минимум «Спереди» и ещё одну сторону, плюс отдельное фото «Для проверки». Для автоподбора выберите минимум 5 фото с известными углами.')
             # Front is the user-selected main photo. Angles increase around Y.
             origin = float(refs[0]['azimuth_deg'])
             chosen = {}

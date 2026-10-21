@@ -1,25 +1,37 @@
 const $=id=>document.getElementById(id);
 const file=p=>'/api/files/'+p.split('/').map(encodeURIComponent).join('/');
 const requestedRun=new URLSearchParams(location.search).get('run')??'';
-let datasets=[],activeId=/^[a-f0-9]{12}$/.test(requestedRun)?requestedRun:null,activeRun=null,selectedIteration=null,renderedMesh=null,selectedStage='overview',stageInventory=null,stageRunId=null,formRunId=null;
+let datasets=[],activeId=/^[a-f0-9]{12}$/.test(requestedRun)?requestedRun:null,activeRun=null,selectedIteration=null,renderedMesh=null,selectedStage='overview',stageInventory=null,stageRunId=null,formRunId=null,sideAssignments={};
 function updateURL(){const u=new URL(location.href);if(activeId)u.searchParams.set('run',activeId);else u.searchParams.delete('run');window.history.replaceState(null,'',u)}
 async function api(url,options={}){const r=await fetch(url,options);if(!r.ok){let j;try{j=await r.json()}catch{throw Error(r.statusText)}throw Error(typeof j.detail==='string'?j.detail:JSON.stringify(j.detail))}return r.json()}
 function text(el,value){el.textContent=value??''}
 function node(tag,cls,value){let e=document.createElement(tag);if(cls)e.className=cls;if(value!==undefined)e.textContent=value;return e}
 async function loadLibrary(selected){datasets=await api('/api/library');$('dataset').replaceChildren(...datasets.map(x=>{let o=node('option',null,x.name+' · '+x.images.length+' видов');o.value=x.id;return o}));$('dataset').value=selected??datasets.find(x=>x.id.endsWith('/rubber_duck'))?.id??datasets[0]?.id;chooseDataset()}
-function chooseDataset(){const d=datasets.find(x=>x.id===$('dataset').value);if(!d)return;$('sideSelectors').replaceChildren();text($('warning'),d.warning);$('prompt').value=d.prompt;$('background').value=['rubber_duck','lucky_cat','frog'].some(n=>d.id.endsWith('/'+n))?'black':'rembg';const stride=Math.max(1,Math.floor(d.images.length/4));const front=$('generator').value==='hunyuan'?d.front_azimuth_deg:300;let defaultGen=d.images.findIndex(x=>x.azimuth_deg===front);if(defaultGen<0)defaultGen=0;$('references').replaceChildren(...d.images.map((x,i)=>{const box=node('div','ref');let im=node('img');im.src=file(x.path);im.alt='Ракурс '+(x.azimuth_deg??i+1);let ch=node('input');ch.type='checkbox';ch.value=i;ch.checked=d.images.every(r=>r.azimuth_deg!=null)||i%stride===0||i===defaultGen;ch.title='Использовать ракурс';let ra=node('input');ra.type='radio';ra.name='generation';ra.value=i;ra.checked=i===defaultGen;ra.title='Изображение для генерации';ch.onchange=()=>{box.classList.toggle('selected',ch.checked);refreshSides()};ra.onchange=()=>{ch.checked=true;ch.onchange()};box.append(im,ch,ra);ch.onchange();return box}));refreshSides();}
-function selectedOrder(){const ids=[...$('references').querySelectorAll('input[type=checkbox]:checked')].map(x=>+x.value),front=+document.querySelector('input[name=generation]:checked')?.value;return [front,...ids.filter(i=>i!==front)]}
+function chooseDataset(){const d=datasets.find(x=>x.id===$('dataset').value);if(!d)return;sideAssignments={};$('sideSelectors').replaceChildren();text($('warning'),d.warning);$('prompt').value=d.prompt;$('background').value=['rubber_duck','lucky_cat','frog'].some(n=>d.id.endsWith('/'+n))?'black':'rembg';const stride=Math.max(1,Math.floor(d.images.length/4));const front=$('generator').value==='hunyuan'?d.front_azimuth_deg:300;let defaultGen=d.images.findIndex(x=>x.azimuth_deg===front);if(defaultGen<0)defaultGen=0;$('references').replaceChildren(...d.images.map((x,i)=>{const box=node('div','ref');let im=node('img');im.src=file(x.path);im.alt='Ракурс '+(x.azimuth_deg??i+1);let ch=node('input');ch.type='checkbox';ch.value=i;ch.checked=d.images.every(r=>r.azimuth_deg!=null)||i%stride===0||i===defaultGen;ch.title='Использовать ракурс';let ra=node('input');ra.type='radio';ra.name='generation';ra.value=i;ra.checked=i===defaultGen;ra.title='Изображение для генерации';ch.onchange=()=>{box.classList.toggle('selected',ch.checked);refreshSides()};ra.onchange=()=>{ch.checked=true;ch.onchange()};const role=node('select','view-role');role.dataset.photo=i;role.setAttribute('aria-label','Сторона фото '+(i+1));for(const [value,label] of Object.entries({'':'Проверка',front:'Спереди',left:'Слева',back:'Сзади',right:'Справа'})){const o=node('option',null,label);o.value=value;role.append(o)}role.onchange=()=>assignSide(i,role.value);box.append(im,ch,ra,role);ch.onchange();return box}));refreshSides();}
+function selectedOrder(){const ids=[...$('references').querySelectorAll('input[type=checkbox]:checked')].map(x=>+x.value),front=+document.querySelector('input[name=generation]:checked')?.value;return ids.includes(front)?[front,...ids.filter(i=>i!==front)]:ids}
+function assignSide(photo,side){
+ for(const [key,value] of Object.entries(sideAssignments))if(value===photo||key===side)delete sideAssignments[key];
+ if(side){sideAssignments[side]=photo;const ch=$('references').querySelector('input[type=checkbox][value="'+photo+'"]');if(ch){ch.checked=true;ch.parentElement.classList.add('selected')}if(side==='front'){const ra=$('references').querySelector('input[type=radio][value="'+photo+'"]');if(ra)ra.checked=true}}
+ text($('formError'),'');refreshSides();
+}
 function refreshSides(saved){
  const order=selectedOrder(),d=datasets.find(x=>x.id===$('dataset').value);if(!d)return;
- const old=Object.fromEntries([...$('sideSelectors').querySelectorAll('select')].map(x=>[x.dataset.side,x.value]));
+ if(saved!==undefined){sideAssignments={};for(const [side,index] of Object.entries(saved??{}))if(order[index]!==undefined)sideAssignments[side]=order[index]}
+ for(const [side,photo] of Object.entries(sideAssignments))if(!order.includes(photo))delete sideAssignments[side];
+ const enabled=$('generator').value==='hunyuan';$('references').classList.toggle('marking',enabled);
+ for(const sel of $('references').querySelectorAll('.view-role')){sel.hidden=!enabled;sel.value=Object.keys(sideAssignments).find(k=>sideAssignments[k]===+sel.dataset.photo)??''}
  $('sideSelectors').replaceChildren(...Object.entries({front:'Спереди',left:'Слева',back:'Сзади',right:'Справа'}).map(([side,label])=>{
   const wrap=node('label',null,label),sel=node('select');sel.dataset.side=side;
-  const auto=node('option',null,'Не назначен');auto.value='';sel.append(auto);
+  const empty=node('option',null,'Не назначен');empty.value='';sel.append(empty);
   for(const i of order){if(!d.images[i])continue;const o=node('option',null,'Фото '+(i+1)+(d.images[i].azimuth_deg!=null?' · '+d.images[i].azimuth_deg+'°':''));o.value=i;sel.append(o)}
-  sel.value=saved&&side in saved?String(order[saved[side]]):(old[side]??'');wrap.append(sel);return wrap;
+  sel.value=side in sideAssignments?String(sideAssignments[side]):'';
+  sel.onchange=()=>{if(sel.value===''){delete sideAssignments[side];refreshSides()}else assignSide(+sel.value,side)};
+  wrap.append(sel);return wrap;
  }));
+ const count=Object.keys(sideAssignments).length,holdout=order.filter(i=>!Object.values(sideAssignments).includes(i)).length;
+ text($('viewHint'),enabled?(count?'Размечено сторон: '+count+'. Фото для проверки: '+holdout+'. '+(!('front' in sideAssignments)?'Назначьте вид спереди.':count<2?'Назначьте ещё минимум одну сторону.':holdout<1?'Оставьте хотя бы одно фото для проверки.':'Стороны будут использованы для генерации, остальные выбранные фото — для проверки.'):'Назначьте стороны в списках под фотографиями. Для ручной разметки нужны минимум 2 стороны, включая вид спереди, и ещё одно фото для проверки. Без разметки для набора с известными углами доступен автоподбор.'):'Галочка — использовать фото. Кружок — главное изображение.');
 }
-function readSides(){if($('generator').value!=='hunyuan')return null;const result={},order=selectedOrder();for(const sel of $('sideSelectors').querySelectorAll('select'))if(sel.value!=='')result[sel.dataset.side]=order.indexOf(+sel.value);return Object.keys(result).length?result:null}
+function readSides(){if($('generator').value!=='hunyuan')return null;const result={},order=selectedOrder();for(const [side,photo] of Object.entries(sideAssignments))result[side]=order.indexOf(photo);return Object.keys(result).length?result:null}
 function restoreParameters(run){
  const p=run.parameters,d=datasets.find(d=>d.id===p.dataset_id);if(!d)return;
  $('dataset').value=d.id;chooseDataset();
@@ -28,7 +40,13 @@ function restoreParameters(run){
  $('prompt').value=p.prompt;$('background').value=p.background;$('generator').value=p.generator??'sf3d';refreshSides(p.view_sides);$('iterations').value=p.iterations;$('seed').value=p.seed;$('crop').value=p.crop?p.crop.join(','):'';
 }
 $('dataset').onchange=chooseDataset;
-$('generator').onchange=()=>{if($('generator').value!=='hunyuan')return;const d=datasets.find(x=>x.id===$('dataset').value);const i=d?.images.findIndex(x=>x.azimuth_deg===d.front_azimuth_deg);if(i>=0){const radio=$('references').querySelector('input[type=radio][value="'+i+'"]');if(radio){radio.checked=true;radio.onchange()}}};
+$('generator').onchange=()=>{
+ if($('generator').value==='hunyuan'&&!('front' in sideAssignments)){
+  const d=datasets.find(x=>x.id===$('dataset').value);const i=d?.images.findIndex(x=>x.azimuth_deg===d.front_azimuth_deg);
+  if(i>=0){const radio=$('references').querySelector('input[type=radio][value="'+i+'"]');if(radio){radio.checked=true;radio.onchange()}}
+ }
+ text($('formError'),'');refreshSides();
+};
 $('upload').onchange=async()=>{try{let f=new FormData();for(let x of $('upload').files)f.append('files',x);let r=await api('/api/uploads',{method:'POST',body:f});await loadLibrary(r.dataset_id)}catch(e){text($('formError'),e.message)}};
 $('start').onclick=async()=>{text($('formError'),'');$('start').disabled=true;try{let crop=$('crop').value.trim();const req={dataset_id:$('dataset').value,image_indexes:[...$('references').querySelectorAll('input[type=checkbox]:checked')].map(x=>+x.value),generation_index:+document.querySelector('input[name=generation]:checked').value,prompt:$('prompt').value,seed:+$('seed').value,iterations:+$('iterations').value,background:$('background').value,generator:$('generator').value,view_sides:readSides(),crop:crop?crop.split(',').map(Number):null};let r=await api('/api/runs',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(req)});activeId=r.id;updateURL();selectedIteration=null;await refreshRuns();showRun(r)}catch(e){text($('formError'),e.message)}finally{$('start').disabled=false}};
 let historySignature='';async function refreshRuns(){let runs=await api('/api/runs');let signature=JSON.stringify(runs);if(signature!==historySignature){historySignature=signature;let placeholder=node('option',null,'История запусков');placeholder.value='';$('history').replaceChildren(placeholder,...runs.map(x=>{let o=node('option',null,x.name+' · '+statusNames[x.status]);o.value=x.id;return o}))}$('history').value=activeId??'';}
