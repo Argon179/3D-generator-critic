@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 import numpy as np
 from PIL import Image
+from scipy import ndimage
 
 
 def normalized_mask(path, size=128):
@@ -31,11 +32,24 @@ def iou(a, b):
     return float(np.logical_and(a, b).sum() / union) if union else 0.0
 
 
+def contour_metrics(a,b):
+    edge_a=a & ~ndimage.binary_erosion(a)
+    edge_b=b & ~ndimage.binary_erosion(b)
+    da=ndimage.distance_transform_edt(~edge_a)
+    db=ndimage.distance_transform_edt(~edge_b)
+    ab=db[edge_a];ba=da[edge_b]
+    precision=float(np.mean(ab<=2));recall=float(np.mean(ba<=2))
+    f1=2*precision*recall/max(precision+recall,1e-9)
+    return {'boundary_f1':f1,'contour_distance':float((ab.mean()+ba.mean())/2/np.hypot(*a.shape))}
+
+
 def align(references, render_dir, fixed_pairs=None):
     render_dir = Path(render_dir)
     views = [v for v in json.loads((render_dir / "views.json").read_text()) if v["elevation_deg"] != 90]
     render_masks = {v['file']: normalized_mask(render_dir / v['file']) for v in views}
     ref_masks = [normalized_mask(r['prepared']) for r in references]
+    camera_training=[i for i,r in enumerate(references) if r.get('used_for_generation')]
+    if not camera_training:camera_training=list(range(len(references)))
     if fixed_pairs is not None:
         pairs = [dict(p, iou=iou(ref_masks[p['reference_index']], render_masks[p['render']])) for p in fixed_pairs]
     else:
@@ -55,7 +69,7 @@ def align(references, render_dir, fixed_pairs=None):
                             if v is None:
                                 break
                             candidate.append({'reference_index': k, 'render': v['file'], 'azimuth_deg': angle, 'elevation_deg': elev, 'iou': iou(ref_masks[k], render_masks[v['file']])})
-                        score = np.mean([p['iou'] for p in candidate]) if len(candidate) == len(references) else -1
+                        score = np.mean([p['iou'] for i,p in enumerate(candidate) if i in camera_training]) if len(candidate) == len(references) else -1
                         if score > best:
                             best, pairs = score, candidate
         if pairs is None:
@@ -64,7 +78,8 @@ def align(references, render_dir, fixed_pairs=None):
             for k, mask in enumerate(ref_masks):
                 v = max(views, key=lambda v:iou(mask,render_masks[v['file']]))
                 pairs.append({'reference_index': k, 'render': v['file'], 'azimuth_deg': v['azimuth_deg'], 'elevation_deg': v['elevation_deg'], 'iou': iou(mask,render_masks[v['file']])})
-    return {'silhouette_iou': float(np.mean([p['iou'] for p in pairs])), 'pairs': pairs, 'alignment': 'fixed_from_baseline' if fixed_pairs is not None else 'shared_azimuth_search' if known else 'independent_silhouette_search', 'limitations': 'Контуры нормированы по масштабу и сдвигу. Камера приблизительная; IoU не доказывает точность 3D.'}
+    for p in pairs:p.update(contour_metrics(ref_masks[p['reference_index']],render_masks[p['render']]))
+    return {'camera_training_count':len(camera_training),'boundary_f1':float(np.mean([p['boundary_f1'] for p in pairs])), 'contour_distance':float(np.mean([p['contour_distance'] for p in pairs])), 'silhouette_iou': float(np.mean([p['iou'] for p in pairs])), 'pairs': pairs, 'alignment': 'fixed_from_baseline' if fixed_pairs is not None else 'shared_azimuth_search' if known else 'independent_silhouette_search', 'limitations': 'Контуры нормированы по масштабу и сдвигу. Камера приблизительная; IoU не доказывает точность 3D.'}
 
 
 def acceptance(before, after, margin=0.005):
@@ -78,4 +93,27 @@ def acceptance(before, after, margin=0.005):
     delta = float(np.mean([b[i]-a[i] for i in holdout]))
     worst = min(b[i]-a[i] for i in holdout)
     ok = delta >= margin and worst >= -0.03
-    return ok, f"Δ IoU проверочных видов: {delta:+.4f}; худший: {worst:+.4f}"
+    details=[]
+    for key,tolerance,direction in [('boundary_f1',.01,1),('contour_distance',.002,-1)]:
+        if all(key in p for report in (before,after) for p in report['pairs']):
+            first={p['reference_index']:p[key] for p in before['pairs']}
+            last={p['reference_index']:p[key] for p in after['pairs']}
+            change=float(np.mean([last[i]-first[i] for i in holdout]))
+            if change*direction < -tolerance:ok=False
+            details.append(f'{key}: {change:+.4f}')
+    old=before.get('geometry',{});new=after.get('geometry',{})
+    if new.get('flat_cap_fraction',0)>.18 and new.get('flat_cap_fraction',0)>old.get('flat_cap_fraction',0)+.03:
+        ok=False;details.append('увеличился плоский срез')
+    if new.get('severity','none')!='none' and new.get('thickness_ratio',1)<old.get('thickness_ratio',1):
+        ok=False;details.append('усилилась плоскостность')
+    return ok, ('; '.join(details)+'; ' if details else '')+f"Δ IoU проверочных видов: {delta:+.4f}; худший: {worst:+.4f}"
+
+
+def validation_summary(report):
+    groups={}
+    for name,wanted in [('heldout',False),('used_for_generation',True)]:
+        pairs=[p for p in report['pairs'] if bool(p.get('used_for_generation',p['reference_index']==0))==wanted]
+        groups[name]={'count':len(pairs)}
+        for key in ['iou','boundary_f1','contour_distance']:
+            groups[name][key]=float(np.mean([p[key] for p in pairs])) if pairs and all(key in p for p in pairs) else None
+    return groups

@@ -10,7 +10,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from fastapi import FastAPI, HTTPException, Request, UploadFile, File
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from PIL import Image
 from pydantic import BaseModel, Field
@@ -73,6 +73,7 @@ class RunRequest(BaseModel):
     seed:int=Field(default=42,ge=0,le=2**31-1)
     iterations:int=Field(default=1,ge=0,le=3)
     background:str='rembg'
+    generator:str='auto'
     crop:list[float]|None=None
 
 
@@ -83,6 +84,9 @@ def create_run(body:RunRequest):
     indexes=list(dict.fromkeys(body.image_indexes))
     if len(indexes)<2 or any(i<0 or i>=len(dataset['images']) for i in indexes):raise HTTPException(400,'Выберите минимум два разных ракурса')
     if body.generation_index not in indexes:raise HTTPException(400,'Фото для генерации должно быть выбрано')
+    if body.generator not in {'auto','sf3d','multiview'}:raise HTTPException(400,'Неизвестный генератор')
+    if body.generator=='multiview' and (len(indexes)<5 or any(dataset['images'][i].get('azimuth_deg') is None for i in indexes)):
+        raise HTTPException(400,'Для многовидового режима нужны минимум 5 фото с известными азимутами')
     if body.background not in {'black','white','rembg','alpha'}:raise HTTPException(400,'Неизвестный режим фона')
     if body.crop is not None:
         if len(body.crop)!=4:raise HTTPException(400,'ROI: x,y,width,height')
@@ -118,6 +122,30 @@ def runs():
 def get_run(ident:str):
     try:return read_run(ident)
     except (OSError,ValueError):raise HTTPException(404,'Запуск не найден')
+
+
+@app.get('/api/runs/{ident}/stages')
+def get_stages(ident:str):
+    from gai.artifacts import stage_inventory
+    try:return stage_inventory(ident)
+    except (OSError,ValueError):raise HTTPException(404,'Запуск не найден')
+
+
+@app.get('/api/runs/{ident}/preview')
+def get_mesh_preview(ident:str,artifact:str):
+    import numpy as np
+    import trimesh
+    try:folder=run_dir(ident).resolve()
+    except ValueError:raise HTTPException(404,'Запуск не найден')
+    path=(ROOT/artifact).resolve()
+    if not path.is_relative_to(folder) or not path.is_file() or path.suffix not in {'.obj','.glb'}:
+        raise HTTPException(404,'Модель не найдена')
+    mesh=trimesh.load(path,force='mesh',process=True)
+    if len(mesh.faces)>20000:mesh=mesh.simplify_quadric_decimation(face_count=20000)
+    span=float(np.ptp(mesh.vertices,axis=0).max())
+    if span<=0:raise HTTPException(422,'Пустая геометрия')
+    mesh.vertices=(mesh.vertices-mesh.bounds.mean(axis=0))*2/span
+    return PlainTextResponse(mesh.export(file_type='obj',include_texture=False))
 
 
 @app.post('/api/runs/{ident}/cancel')

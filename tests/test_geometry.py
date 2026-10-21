@@ -23,3 +23,11 @@ def test_camera_excuse_cannot_hide_measured_flatness():
     assert 'малая толщина' in result['summary_ru']
     assert result['issues'] and not result['should_edit']
     assert result['target_description']=='a cat'
+
+
+def test_vlm_flatness_disagreement_is_explicit_for_volumetric_mesh():
+    report=geometry_report(trimesh.creation.icosphere())
+    c={'summary_ru':'Вся модель плоская','issues':[],'base_description':'a ball','target_description':'a ball'}
+    result=enforce_geometry_warning(c,report)
+    assert result['quality_warnings']
+    assert result['summary_ru']==c['summary_ru']  # Preserve the actual VLM verdict.

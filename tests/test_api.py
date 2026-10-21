@@ -28,3 +28,27 @@ def test_generation_view_and_roi_validated():
     assert client.post('/api/runs',json=body).status_code==400
     body.update(generation_index=0,crop=[.8,.1,.5,.5])
     assert client.post('/api/runs',json=body).status_code==400
+
+
+def test_stage_preview_cannot_read_outside_the_run():
+    client=TestClient(app)
+    response=client.get('/api/runs/abcdef123456/preview',params={'artifact':'configs/project.json'})
+    assert response.status_code==404
+    assert client.get('/api/runs/not-a-run/stages').status_code==404
+
+
+def test_existing_run_stage_inventory_and_glb_preview():
+    client=TestClient(app)
+    # Saved local regression run; fresh clones can still run all synthetic checks.
+    from gai.core import RUNS
+    import pytest
+    ident='1445bcda34e7'
+    if not (RUNS/ident/'state.json').exists():pytest.skip('No saved local run')
+    result=client.get(f'/api/runs/{ident}/stages')
+    assert result.status_code==200
+    stages=result.json()['stages']
+    assert {'inputs','generation','critic_0','render_0'}<={s['id'] for s in stages}
+    generated=f'runs/{ident}/iteration_00/generated.glb'
+    preview=client.get(f'/api/runs/{ident}/preview',params={'artifact':generated})
+    assert preview.status_code==200 and '\nv ' in preview.text and '\nf ' in preview.text
+    assert client.get(f'/api/runs/{ident}/preview',params={'artifact':'runs/../configs/project.json'}).status_code==404

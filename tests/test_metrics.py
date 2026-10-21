@@ -60,3 +60,36 @@ def test_retry_photos_are_not_holdout_evidence():
     # Improved on every attempted photo, worse on the only unseen photo.
     assert not acceptance(report([.5,.5,.5,.8]),report([.9,.9,.9,.7]))[0]
     assert not acceptance(report([.5,.5,.5]),report([.9,.9,.9]))[0]
+
+
+def test_boundary_metrics_detect_displaced_outline():
+    from gai.metrics import contour_metrics
+    a=np.zeros((128,128),bool);a[20:90,30:80]=True
+    b=np.roll(a,8,axis=1)
+    exact=contour_metrics(a,a);shifted=contour_metrics(a,b)
+    assert exact['boundary_f1']==1 and exact['contour_distance']==0
+    assert shifted['boundary_f1']<.5 and shifted['contour_distance']>0
+
+
+def test_increased_flat_cap_vetoes_iou_improvement():
+    before={'pairs':[{'reference_index':0,'iou':.7},{'reference_index':1,'iou':.7}], 'geometry':{'flat_cap_fraction':.05}}
+    after={'pairs':[{'reference_index':0,'iou':.8},{'reference_index':1,'iou':.8}], 'geometry':{'flat_cap_fraction':.35}}
+    assert not acceptance(before,after)[0]
+
+
+def test_validation_summary_keeps_training_and_holdout_separate():
+    from gai.metrics import validation_summary
+    report={'pairs':[{'reference_index':0,'iou':1.,'used_for_generation':True},{'reference_index':1,'iou':.4,'used_for_generation':False}]}
+    groups=validation_summary(report)
+    assert groups['heldout']['count']==1 and groups['heldout']['iou']==.4
+    assert groups['used_for_generation']['iou']==1
+
+
+def test_holdout_cannot_choose_camera_alignment(tmp_path):
+    for name,box in [('front.png',(20,10,39,79)),('side.png',(10,20,79,39))]:rgba(tmp_path/name,box)
+    save_json(tmp_path/'views.json',[{'file':('front.png' if a%180==0 else 'side.png'),'azimuth_deg':a,'elevation_deg':0} for a in [0,90,180,270]])
+    refs=[{'prepared':str(tmp_path/('front.png' if i%2==0 else 'front.png')),'azimuth_deg':a,'used_for_generation':i==0} for i,a in enumerate([0,90,180,270])]
+    report=align(refs,tmp_path)
+    assert report['camera_training_count']==1
+    assert report['pairs'][0]['azimuth_deg']==0
+    assert report['pairs'][1]['iou']<.4

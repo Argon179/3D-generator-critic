@@ -23,13 +23,35 @@ def geometry_report(mesh):
              'Для намеренно тонкой детали такая форма может быть правильной. '
              'Нужна проверка бокового и верхнего видов.' if severity!='none' else
              'Выраженная плоскостность не обнаружена; это не подтверждает правильность формы.')
-    return {'principal_spreads':spreads.tolist(),'thickness_ratio':ratio,'severity':severity,
+    # Large flat caps on figurines are suspicious, but valid on machined parts.
+    normals=np.asarray(mesh.face_normals)
+    flat_cap=0.0
+    _,axes=np.linalg.eigh(covariance)
+    for axis in np.vstack((np.eye(3),axes.T)):
+        projected=np.asarray(mesh.vertices)@axis
+        span=max(float(np.ptp(projected)),1e-9)
+        projected_tri=triangles@axis
+        aligned=np.abs(normals@axis)>.97
+        for bound in (projected.min(),projected.max()):
+            on_plane=np.max(np.abs(projected_tri-bound),axis=1)<span*.008
+            flat_cap=max(flat_cap,float(weights[on_plane & aligned].sum()))
+    closed=bool(mesh.is_watertight and mesh.is_winding_consistent)
+    volume=float(abs(mesh.volume)) if closed else None
+    try:convex_volume=float(mesh.convex_hull.volume)
+    except Exception:convex_volume=None
+    return {'watertight':bool(mesh.is_watertight),'winding_consistent':bool(mesh.is_winding_consistent),
+            'components':int(mesh.body_count),'surface_area':float(mesh.area),'volume':volume,
+            'volume_to_convex_hull':volume/convex_volume if volume is not None and convex_volume and convex_volume>1e-12 else None,
+            'flat_cap_fraction':flat_cap,'principal_spreads':spreads.tolist(),'thickness_ratio':ratio,'severity':severity,
             'axis_extents':np.asarray(mesh.extents).tolist(),'warning_ru':message,
             'limitations':'Эвристика толщины поверхности, не сравнение с эталонной 3D-моделью.'}
 
 
 def enforce_geometry_warning(data, report):
     data=dict(data)
+    words=(data.get('summary_ru','')+' '+str(data.get('issues',[]))).lower().replace('ё','е')
+    if report['severity']=='none' and report.get('flat_cap_fraction',0)<.18 and any(w in words for w in ['плоск','flat','sheet']):
+        data['quality_warnings']=['VLM указывает на плоскостность, но численная проверка не обнаруживает глобально тонкую сетку или крупный плоский срез. Оценки расходятся: проверьте независимые виды. Глобальная толщина не исключает локальных дефектов.']
     if report['severity']=='none':
         return data
     data['summary_ru']=(report['warning_ru']+' Оценка VLM: '+data['summary_ru'])[:2000]

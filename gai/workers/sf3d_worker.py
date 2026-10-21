@@ -73,7 +73,7 @@ def main():
     chosen=0
     # SF3D is single-view. Retry individual available photos rather than stretch
     # the flattened mesh and pretend missing geometry has been reconstructed.
-    if report['severity']!='none' and len(refs)>1:
+    if job.get('retry',True) and report['severity']!='none' and len(refs)>1:
         def priority(index,target):
             im=Image.open(refs[index]['prepared'])
             box=im.getchannel('A').getbbox()

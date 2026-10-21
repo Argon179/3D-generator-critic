@@ -14,7 +14,7 @@ import trimesh
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from gai.core import ROOT, RUNS, Cancelled, command, config, event, local_path, read_run, run_dir, save_json, update_run
-from gai.metrics import align, acceptance
+from gai.metrics import align, acceptance, validation_summary
 from gai.geometry import geometry_report, enforce_geometry_warning
 
 
@@ -25,6 +25,7 @@ class Critique(BaseModel):
     confidence: float=Field(ge=0,le=1)
     should_edit: bool
     issues: list[dict]=Field(default_factory=list,max_length=10)
+    quality_warnings: list[str]=Field(default_factory=list,max_length=3)
     base_description: str=Field(min_length=3,max_length=250)
     target_description: str=Field(min_length=3,max_length=250)
 
@@ -135,9 +136,10 @@ def execute(run_id):
         state=read_run(run_id);params=state['parameters'];refs=state['references']
         update_run(run_id,status='running',stage='generate')
         initial=folder/'iteration_00';initial.mkdir(exist_ok=True)
+        use_multiview=params.get('generator','auto')!='sf3d' and len(refs)>=5 and all(r.get('azimuth_deg') is not None for r in refs)
         event(run_id,'SF3D: подготовка масок и генерация по первому выбранному изображению')
         job=folder/'generation_job.json'
-        save_json(job,{'repo':str(local_path(cfg['sf3d_repo'])),'model':cfg['sf3d_model'],'revision':cfg.get('sf3d_revision'),'seed':params['seed'],'out':str(initial),'references':refs,'background':params['background']})
+        save_json(job,{'repo':str(local_path(cfg['sf3d_repo'])),'model':cfg['sf3d_model'],'revision':cfg.get('sf3d_revision'),'seed':params['seed'],'out':str(initial),'references':refs,'background':params['background'],'retry':not use_multiview})
         command(run_id,[local_path(cfg['sf3d_python']),ROOT/'gai/workers/sf3d_worker.py',job])
         refs=json.loads((initial/'references.json').read_text())
         quality_file=initial/'generation_quality.json'
@@ -146,7 +148,49 @@ def execute(run_id):
             if len(quality['candidates'])>1:
                 event(run_id,f"SF3D: проверено {len(quality['candidates'])} отдельных ракурсов; выбран №{quality['selected_reference_index']} по эвристике толщины. Это не оценка точности 3D.")
         meta=canonical_mesh(initial/'generated.glb',initial/'mesh.obj',cfg['max_faces']);save_json(initial/'mesh_info.json',meta)
-        mesh=initial/'mesh.obj';baseline_pairs=None;iterations=[];current_description=params['prompt']
+        mesh=initial/'mesh.obj'
+        save_json(initial/'sf3d_mesh_info.json',meta)
+        backend='Stable Fast 3D'
+        if use_multiview:
+            from gai.reconstruction import visual_hull
+            event(run_id,'Многовидовая реконструкция: известные азимуты, часть фото оставлена для проверки')
+            reconstruction=initial/'reconstruction';reconstruction.mkdir(exist_ok=True)
+            original_generation_flags=[ref.get('used_for_generation',i==0) for i,ref in enumerate(refs)]
+            # Do not reuse the reserved photos in SF3D retries or hull construction.
+            heldout=max(1,len(refs)//4)
+            heldout_indexes=set(np.linspace(1,len(refs)-1,heldout,dtype=int).tolist())
+            training=[ref for i,ref in enumerate(refs) if i not in heldout_indexes]
+            for i,ref in enumerate(refs):ref['used_for_generation']=i not in heldout_indexes
+            try:
+                reconstructed=visual_hull(training)
+                reconstructed.export(reconstruction/'visual_hull.glb')
+                shutil.copy2(mesh,initial/'sf3d.obj')
+                meta=canonical_mesh(reconstruction/'visual_hull.glb',reconstruction/'mesh.obj',cfg['max_faces'])
+                mesh=reconstruction/'mesh.obj';backend='Многовидовая реконструкция по силуэтам'
+                save_json(reconstruction/'reconstruction.json',{'method':'orthographic visual hull','training_references':[r['prepared'] for r in training],
+                    'heldout_references':[r['prepared'] for i,r in enumerate(refs) if i in heldout_indexes],'elevation_deg':0,'camera_estimated':True,
+                    'mesh_info':meta,'limitations':'Известны относительные азимуты; масштаб по высоте и камера приблизительные. Впадины и скрытые детали не восстанавливаются.'})
+                save_json(initial/'references.json',refs)
+                event(run_id,'Восстановлен объём по нескольким реальным силуэтам; исходная SF3D-сетка сохранена отдельно')
+                source_preview=initial/'sf3d_evaluation';source_preview.mkdir(exist_ok=True)
+                render(run_id,initial/'sf3d.obj',source_preview,dict(cfg,render_elevations=[0],render_step_deg=90))
+                source_report=align(refs,source_preview/'renders')
+                for pair in source_report['pairs']:
+                    pair['reference_path']=str(Path(refs[pair['reference_index']]['prepared']).relative_to(ROOT))
+                    pair['used_for_generation']=pair['reference_index']==0
+                source_report.update(validation_summary(source_report))
+                source_report['geometry']=geometry_report(trimesh.load(initial/'sf3d.obj',force='mesh'))
+                save_json(source_preview/'comparison.json',{'path':str(source_preview.relative_to(ROOT)),
+                    'mesh':str((initial/'sf3d.obj').relative_to(ROOT)),'metrics':source_report,
+                    'note':'Четыре диагностических вида; для сопоставления используется ближайший силуэт, камера приблизительная.'})
+            except ValueError as exc:
+                if params.get('generator')=='multiview':raise
+                mesh=initial/'mesh.obj';meta=json.loads((initial/'sf3d_mesh_info.json').read_text());backend='Stable Fast 3D'
+                for i,ref in enumerate(refs):ref['used_for_generation']=original_generation_flags[i]
+                save_json(initial/'references.json',refs)
+                event(run_id,'Многовидовая реконструкция недоступна: '+str(exc)+'. Сохранён результат SF3D.')
+        save_json(initial/'mesh_info.json',dict(meta,backend=backend))
+        baseline_pairs=None;iterations=[];current_description=params['prompt']
         update_run(run_id,preview_mesh=str(mesh.relative_to(ROOT)),source_glb=str((initial/'generated.glb').relative_to(ROOT)))
         for number in range(params['iterations']+1):
             current=folder/f'iteration_{number:02d}';current.mkdir(exist_ok=True)
@@ -155,11 +199,13 @@ def execute(run_id):
             render(run_id,mesh,current,cfg)
             report=align(refs,current/'renders',baseline_pairs)
             for pair in report['pairs']:
+                pair['reference_azimuth_deg']=refs[pair['reference_index']].get('azimuth_deg')
                 pair['used_for_generation']=refs[pair['reference_index']].get('used_for_generation',pair['reference_index']==0)
                 pair['reference_path']=str(Path(refs[pair['reference_index']]['prepared']).relative_to(ROOT)) if Path(refs[pair['reference_index']]['prepared']).is_absolute() else refs[pair['reference_index']]['prepared']
             views=json.loads((current/'renders/views.json').read_text()) if (current/'renders/views.json').exists() else []
             report['audit_views']=[dict(v,path=str((current/'renders'/v['file']).relative_to(ROOT))) for v in views if (v['azimuth_deg'] in (0,90,180,270) and v['elevation_deg']==0) or v['elevation_deg']==90]
             report['geometry']=geometry_report(trimesh.load(mesh,force='mesh',process=False))
+            report.update(validation_summary(report))
             save_json(current/'metrics.json',report)
             if baseline_pairs is None:baseline_pairs=report['pairs']
             update_run(run_id,stage='critique')
@@ -168,9 +214,10 @@ def execute(run_id):
             if number:
                 accepted,reason=acceptance(previous_report,report,cfg['acceptance_margin'])
                 if critique.camera_mismatch:accepted=False;reason+='; критик обнаружил несогласование камеры'
+                if critique.quality_warnings:accepted=False;reason+='; противоречивая оценка объёма'
                 if report['geometry']['severity']!='none' and report['geometry']['thickness_ratio']<previous_report['geometry']['thickness_ratio']:
                     accepted=False;reason+='; усилилась плоскостность сетки'
-            item={'number':number,'path':str(current.relative_to(ROOT)),'mesh':str(mesh.relative_to(ROOT)),'metrics':report,'critique':critique.model_dump(),'accepted':accepted,'decision':reason}
+            item={'backend':backend,'number':number,'path':str(current.relative_to(ROOT)),'mesh':str(mesh.relative_to(ROOT)),'metrics':report,'critique':critique.model_dump(),'accepted':accepted,'decision':reason}
             iterations.append(item);update_run(run_id,iterations=iterations)
             event(run_id,reason)
             if accepted:
@@ -185,6 +232,8 @@ def execute(run_id):
                 stop_reason='Достигнут выбранный лимит итераций'
             elif report['geometry']['severity']!='none':
                 stop_reason='Автоправка пропущена: обнаружена малая толщина. Нужна проверка объёма и повторная генерация.'
+            elif critique.quality_warnings:
+                stop_reason='Автоправка пропущена: оценка VLM расходится с численной проверкой объёма'
             elif critique.camera_mismatch:
                 stop_reason='Правка пропущена: критик указал несогласование камеры'
             elif not critique.should_edit:
