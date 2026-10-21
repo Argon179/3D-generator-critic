@@ -88,13 +88,31 @@ cd "/home/msi/Рабочий стол/Учёба/GAI"
 
 `smoke_render.py` создаёт **техническую тестовую сетку**, делает четыре реальных EEVEE-рендера и проверяет roundtrip силуэтов. Он не имитирует генерацию нейросетью и не выдаёт фиктивную критику. Результат — `runs/_smoke/test_report.json`. Тесты API и метрик выполняются в обычном терминале, поскольку песочница ограничивает потоки/локальные сокеты TestClient.
 
+## Установка из GitHub (Linux x86_64)
+
+Нужны Python 3.12, Git, работающий драйвер NVIDIA, CUDA Toolkit с `nvcc`, совместимый C++-компилятор и Python-окружение с `torch==2.5.1+cu121`, `torchvision==0.20.1+cu121`. CUDA 12.0 на текущем компьютере проверена с g++-12. Локальный `tools/compiler` в Git не входит; на новой машине используйте установленный совместимый компилятор (`CC`, `CXX`, `CUDAHOSTCXX`). Скрипты не устанавливают драйвер, CUDA и системные пакеты.
+
+```bash
+git clone https://github.com/Argon179/3D-generator-critic.git
+cd 3D-generator-critic
+python3 scripts/bootstrap.py --plan
+python3 scripts/bootstrap.py
+/path/to/torch/python scripts/setup.py --component all
+./login-hf.sh
+.venvs/qwen/bin/python scripts/download_models.py
+.venv/bin/python scripts/doctor.py
+./run.sh
+```
+
+Замените `/path/to/torch/python` на Python подготовленного окружения. `bootstrap.py` использует только стандартную библиотеку Python 3.12: скачивает две зафиксированные Git-ревизии и официальный Blender, проверяет SHA256 перед распаковкой. Повторный запуск проверяет существующие версии; другую ревизию и локальные изменения в `vendor` он не перезаписывает. `--plan` ничего не скачивает и не записывает. Можно выбрать `--component sources` или `--component blender`. На чистой установке загрузите собственные фотографии через интерфейс; локальные примеры и история запусков автоматически из Git не появятся.
+
 Для воспроизведения окружений на этом компьютере:
 
 ```bash
 /home/msi/anaconda3/envs/dl/bin/python scripts/setup.py --component all
 ```
 
-Скрипт ожидает уже скачанные `vendor/` и `tools/`, существующий torch 2.5.1+cu121. Драйвер и системный CUDA Toolkit он не устанавливает. Для переноса на другой компьютер подготовить совместимый PyTorch, CUDA Toolkit и C++-компилятор, скачать зафиксированные исходники и изменить пути в конфигурации.
+`setup.py` проверяет версии PyTorch/torchvision и наличие исходников до установки пакетов, затем создаёт изолированные окружения. Для переноса на другой компьютер подготовьте совместимый PyTorch, CUDA Toolkit и C++-компилятор; нестандартные пути меняются в `configs/project.json`. Архитектура CUDA для сборки SF3D по умолчанию — 8.9 (RTX 4070); для другой GPU её нужно задать через `TORCH_CUDA_ARCH_LIST`.
 
 ## Файлы
 

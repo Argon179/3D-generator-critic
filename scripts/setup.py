@@ -20,9 +20,14 @@ def main():
     parser.add_argument('--component',choices=['base','sf3d','qwen','textdeformer','all'],default='all')
     args=parser.parse_args()
     import torch
-    if torch.__version__!='2.5.1+cu121':
+    import torchvision
+    if torch.__version__!='2.5.1+cu121' or torchvision.__version__!='0.20.1+cu121':
         raise SystemExit('Для этих requirements нужен Python с torch==2.5.1+cu121 и torchvision==0.20.1+cu121. Существующие окружения не изменены.')
     names=['base','sf3d','qwen','textdeformer'] if args.component=='all' else [args.component]
+    for name in names:
+        required={'sf3d':'vendor/stable-fast-3d','textdeformer':'vendor/TextDeformer'}.get(name)
+        if required and not (ROOT/required/'.git').exists():
+            raise SystemExit('Сначала выполните python3 scripts/bootstrap.py --component sources')
     for name in names:
         folder=ROOT/('.venv' if name=='base' else '.venvs/'+name)
         if not (folder/'bin/python').exists():venv.create(folder,with_pip=True,system_site_packages=True)
@@ -34,7 +39,7 @@ def main():
             pip('-c','configs/torch-constraints.txt','transformers==4.57.1','accelerate==1.11.0','bitsandbytes==0.48.2','numpy==1.26.4','Pillow>=10,<12')
         elif name=='sf3d':
             pip('-c','configs/torch-constraints.txt','-r','configs/requirements-sf3d.txt')
-            env.update(USE_CUDA='1',TORCH_CUDA_ARCH_LIST='8.9',MAX_JOBS='2')
+            env.update(USE_CUDA='1',TORCH_CUDA_ARCH_LIST=os.environ.get('TORCH_CUDA_ARCH_LIST','8.9'),MAX_JOBS='2')
             pip('--no-build-isolation','./vendor/stable-fast-3d/texture_baker','./vendor/stable-fast-3d/uv_unwrapper')
         else:
             pip('-c','configs/torch-constraints.txt','numpy==1.26.4','scipy==1.13.1','libigl==2.5.1','pymeshlab==2023.12.post3','setuptools==75.8.2','wheel','cholespy','cython','imageio','imageio-ffmpeg','kornia','PyGLM','resize-right','smplx','tqdm','ninja','pyyaml','matplotlib','trimesh','tensorboard','easydict','fire','ftfy','regex')
