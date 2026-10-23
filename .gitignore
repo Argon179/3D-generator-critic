@@ -20,3 +20,5 @@ reference_images/**/*.csv
 reference_images/**/*.xcp
 docs/*.jpg
 docs/*.png
+
+reference_images/technical_orthographic/

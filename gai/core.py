@@ -69,7 +69,7 @@ def event(run_id, message):
 def library():
     base = ROOT / "reference_images/multiview"
     groups = []
-    labels = {"rubber_duck": ("Уточка", "a yellow rubber duck"), "lucky_cat": ("Кот", "a white maneki-neko cat figurine"), "frog": ("Лягушка", "a green frog figurine"), "leopard": ("Леопард", "a toy leopard"), "gear": ("Шестерня", "a blue spur gear"), "nut": ("Гайка", "a hexagonal nut")}
+    labels = {"rubber_duck": ("Уточка", "a yellow rubber duck"), "lucky_cat": ("Кот", "a white maneki-neko cat figurine"), "frog": ("Лягушка", "a green frog figurine"), "leopard": ("Леопард", "a toy leopard"), "cad_bearing_pedestal": ("Корпус подшипника · 6 видов", "a bearing pedestal housing"), "cad_ring_flange": ("Фланец · 6 видов", "a ring flange"), "gear": ("Шестерня", "a blue spur gear"), "nut": ("Гайка", "a hexagonal nut")}
     manifest = {}
     if (base / "sources.json").exists():
         manifest = {r["file"]: r for r in json.loads((base / "sources.json").read_text())}
@@ -85,7 +85,7 @@ def library():
                     continue
                 rel = p.relative_to(ROOT).as_posix()
                 m = manifest.get(p.relative_to(base).as_posix(), {}) if p.is_relative_to(base) else {}
-                images.append({"path": rel, "azimuth_deg": m.get("azimuth_deg")})
+                images.append({"path": rel, "azimuth_deg": m.get("azimuth_deg"), "view_label":m.get("view_label")})
             if images:
                 label, prompt = labels.get(folder.name, (folder.name, ""))
                 groups.append({"id": folder.relative_to(ROOT).as_posix(), "name": label, "prompt": prompt, "images": images, "front_azimuth_deg": {"rubber_duck":270,"lucky_cat":0}.get(folder.name), "warning": "128 × 128: только грубая форма" if folder.name in {"rubber_duck", "lucky_cat", "frog"} else "Нужно выделить деталь на платформе" if folder.name in {"gear", "nut"} else ""})
