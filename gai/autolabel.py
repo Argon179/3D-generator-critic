@@ -16,8 +16,19 @@ def validate_labels(data,indexes):
         if type(index) is not int or index not in indexes:raise ValueError('VLM указала неизвестное фото')
         if index in result.values():raise ValueError('VLM назначила одному фото несколько сторон')
         result[side]=index
-    if len(result)>=len(indexes):raise ValueError('VLM не оставила фото для проверки; назначьте стороны вручную')
-    return {'sides':result,'note':str(data.get('note_ru','Проверьте предложенные стороны вручную.'))[:1000]}
+    notes=[]
+    if len(result)>=len(indexes):
+        # A model may label every supplied photo despite the prompt. Keep a
+        # useful partial annotation and reserve one non-front view explicitly.
+        side=next((s for s in ('right','back','left') if s in result),None)
+        if side is None:raise ValueError('Недостаточно фото для генерации и независимой проверки')
+        reserved=result.pop(side)
+        notes.append(f'Фото {reserved+1} оставлено для независимой проверки; метка {side} снята, остальные метки сохранены.')
+    if not result:notes.append('VLM не смогла определить стороны. Назначьте их вручную или выберите другие фото.')
+    elif 'front' not in result:notes.append('Передний вид не определён: назначьте его вручную.')
+    elif len(result)<2:notes.append('Назначьте вручную ещё одну сторону для генерации.')
+    return {'sides':result,'note':' '.join(notes+[str(data.get('note_ru','Проверьте предложенные стороны вручную.'))[:1000]])}
+
 
 
 def infer_labels(ident,refs):

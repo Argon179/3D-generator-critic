@@ -101,6 +101,6 @@ $('autoLabel').onclick=async()=>{
   if(dataset!==$('dataset').value||JSON.stringify(current)!==JSON.stringify(indexes))throw Error('Набор или выбор фото изменился. Повторите авторазметку.');
   sideAssignments={};$('generator').value='hunyuan';
   for(const [side,index] of Object.entries(result.sides))assignSide(index,side);
-  refreshSides();text($('labelStatus'),'Предложение VLM применено. Проверьте и при необходимости исправьте стороны. '+result.note);
+  refreshSides();text($('labelStatus'),(Object.keys(result.sides).length?'Применено меток: '+Object.keys(result.sides).length+'. Проверьте стороны. ':'Метки не назначены. ')+result.note);
  }catch(e){text($('labelStatus'),e.message)}finally{button.disabled=false}
 };
