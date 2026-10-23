@@ -88,3 +88,19 @@ function drawMesh(){const rect=canvas.getBoundingClientRect();canvas.width=Math.
 canvas.onpointerdown=e=>{drag=[e.clientX,e.clientY];canvas.setPointerCapture(e.pointerId)};canvas.onpointerup=()=>drag=null;canvas.onpointermove=e=>{if(!drag)return;yaw+=(e.clientX-drag[0])*.01;pitch+=(e.clientY-drag[1])*.01;drag=[e.clientX,e.clientY];drawMesh()};canvas.onwheel=e=>{e.preventDefault();zoom=Math.max(.3,Math.min(3,zoom*Math.exp(-e.deltaY*.001)));drawMesh()};new ResizeObserver(drawMesh).observe(canvas);
 async function poll(){try{if(activeId)showRun(await api('/api/runs/'+activeId));await refreshRuns()}catch(e){console.warn(e)}setTimeout(poll,2500)}
 loadLibrary().then(refreshRuns).then(poll).catch(e=>text($('formError'),e.message));refreshHealth();
+
+$('autoLabel').onclick=async()=>{
+ const button=$('autoLabel'),dataset=$('dataset').value,indexes=[...$('references').querySelectorAll('input[type=checkbox]:checked')].map(x=>+x.value);
+ button.disabled=true;text($('labelStatus'),'Qwen анализирует выбранные фотографии…');
+ try{
+  const job=await api('/api/auto-label',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({dataset_id:dataset,image_indexes:indexes,prompt:$('prompt').value||'an object'})});
+  let result;
+  do{await new Promise(resolve=>setTimeout(resolve,1500));result=await api('/api/auto-label/'+job.id)}while(result.status==='running');
+  if(result.status==='failed')throw Error(result.error);
+  const current=[...$('references').querySelectorAll('input[type=checkbox]:checked')].map(x=>+x.value);
+  if(dataset!==$('dataset').value||JSON.stringify(current)!==JSON.stringify(indexes))throw Error('Набор или выбор фото изменился. Повторите авторазметку.');
+  sideAssignments={};$('generator').value='hunyuan';
+  for(const [side,index] of Object.entries(result.sides))assignSide(index,side);
+  refreshSides();text($('labelStatus'),'Предложение VLM применено. Проверьте и при необходимости исправьте стороны. '+result.note);
+ }catch(e){text($('labelStatus'),e.message)}finally{button.disabled=false}
+};

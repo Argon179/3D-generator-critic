@@ -78,6 +78,34 @@ class RunRequest(BaseModel):
     crop:list[float]|None=None
 
 
+label_jobs={}
+
+@app.post('/api/auto-label')
+def auto_label(body:RunRequest):
+    dataset=next((d for d in library() if d['id']==body.dataset_id),None)
+    if dataset is None:raise HTTPException(404,'Набор не найден')
+    indexes=list(dict.fromkeys(body.image_indexes))
+    if len(indexes)<3 or any(i<0 or i>=len(dataset['images']) for i in indexes):
+        raise HTTPException(400,'Выберите минимум 3 фото одного объекта')
+    if len(label_jobs)>=100:
+        for key in list(label_jobs):
+            if label_jobs[key].done():del label_jobs[key]
+    if len(label_jobs)>=100:raise HTTPException(429,'Очередь авторазметки заполнена')
+    from gai.autolabel import infer_labels
+    ident=uuid.uuid4().hex
+    refs=[{'index':i,'path':str(ROOT/dataset['images'][i]['path'])} for i in indexes]
+    label_jobs[ident]=executor.submit(infer_labels,ident,refs)
+    return {'id':ident}
+
+@app.get('/api/auto-label/{ident}')
+def label_status(ident:str):
+    future=label_jobs.get(ident)
+    if future is None:raise HTTPException(404,'Задание не найдено')
+    if not future.done():return {'status':'running'}
+    try:return {'status':'completed',**future.result()}
+    except Exception as exc:return {'status':'failed','error':str(exc)}
+
+
 @app.post('/api/runs')
 def create_run(body:RunRequest):
     dataset=next((x for x in library() if x['id']==body.dataset_id),None)
