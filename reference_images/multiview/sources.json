@@ -1076,5 +1076,48 @@
     "height": 512,
     "license": "CC0 1.0",
     "sha256": "34441d6d1da47be3b1436a67ada80a1460b80e9579a38d45ab2c9f1e8ba740ee"
+  },
+  {
+    "file": "engineering/cad_bearing_pedestal/isometric.png",
+    "object": "cad_bearing_pedestal",
+    "dataset": "CAD_MV80",
+    "source_url": "https://data.mendeley.com/datasets/94njwwgcrs/1",
+    "archive_member": "Original image file/2-Bearing pedestal/0/classes/0/012.png",
+    "view_label": "isometric",
+    "azimuth_deg": null,
+    "kind": "Published CAD diagonal view",
+    "width": 224,
+    "height": 224,
+    "license": "CC BY-NC 3.0",
+    "sha256": "af36cb96a6b3a9569094694720239bd94d9b7467961c46a2bdda5181b150d149"
+  },
+  {
+    "file": "engineering/cad_ring_flange/isometric.png",
+    "object": "cad_ring_flange",
+    "dataset": "CAD_MV80",
+    "source_url": "https://data.mendeley.com/datasets/94njwwgcrs/1",
+    "archive_member": "Original image file/3-Ring flange/0/classes/0/012.png",
+    "view_label": "isometric",
+    "azimuth_deg": null,
+    "kind": "Published CAD diagonal view",
+    "width": 224,
+    "height": 224,
+    "license": "CC BY-NC 3.0",
+    "sha256": "593fab7d90f3e58288e7add093c775a5f6fd56d4c5577a8694ad16ae7d87c514"
+  },
+  {
+    "file": "engineering/cad_spur_gear/isometric.png",
+    "object": "cad_spur_gear",
+    "dataset": "UVA Engineering CAD Library, Gear Train",
+    "source_url": "https://doi.org/10.18130/V3/42ALZX",
+    "source_file": "STL_ Onshape Gear all parts separated .stl",
+    "component_index": 0,
+    "kind": "Local orthographic isometric render of downloaded CAD mesh",
+    "view_label": "isometric",
+    "azimuth_deg": null,
+    "width": 512,
+    "height": 512,
+    "license": "CC0 1.0",
+    "sha256": "ce0646e64141b129347eaf62132cc4864b200173835080e48c330c2082d04edd"
   }
 ]
