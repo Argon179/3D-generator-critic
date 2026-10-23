@@ -1,0 +1,62 @@
+[
+  {
+    "file": "front.png",
+    "view_label": "front",
+    "camera_location": [
+      0,
+      -5,
+      0
+    ],
+    "orthographic_scale": 3.0999999046325684
+  },
+  {
+    "file": "back.png",
+    "view_label": "back",
+    "camera_location": [
+      0,
+      5,
+      0
+    ],
+    "orthographic_scale": 3.0999999046325684
+  },
+  {
+    "file": "left.png",
+    "view_label": "left",
+    "camera_location": [
+      -5,
+      0,
+      0
+    ],
+    "orthographic_scale": 3.0999999046325684
+  },
+  {
+    "file": "right.png",
+    "view_label": "right",
+    "camera_location": [
+      5,
+      0,
+      0
+    ],
+    "orthographic_scale": 3.0999999046325684
+  },
+  {
+    "file": "top.png",
+    "view_label": "top",
+    "camera_location": [
+      0,
+      0,
+      5
+    ],
+    "orthographic_scale": 3.0999999046325684
+  },
+  {
+    "file": "bottom.png",
+    "view_label": "bottom",
+    "camera_location": [
+      0,
+      0,
+      -5
+    ],
+    "orthographic_scale": 3.0999999046325684
+  }
+]

@@ -69,7 +69,7 @@ def event(run_id, message):
 def library():
     base = ROOT / "reference_images/multiview"
     groups = []
-    labels = {"rubber_duck": ("Уточка", "a yellow rubber duck"), "lucky_cat": ("Кот", "a white maneki-neko cat figurine"), "frog": ("Лягушка", "a green frog figurine"), "leopard": ("Леопард", "a toy leopard"), "cad_bearing_pedestal": ("Корпус подшипника · 6 видов", "a bearing pedestal housing"), "cad_ring_flange": ("Фланец · 6 видов", "a ring flange"), "gear": ("Шестерня", "a blue spur gear"), "nut": ("Гайка", "a hexagonal nut")}
+    labels = {"rubber_duck": ("Уточка", "a yellow rubber duck"), "lucky_cat": ("Кот", "a white maneki-neko cat figurine"), "frog": ("Лягушка", "a green frog figurine"), "leopard": ("Леопард", "a toy leopard"), "cad_spur_gear": ("Шестерня · 6 точных видов", "a spur gear with a central bore"), "cad_bearing_pedestal": ("Корпус подшипника · 6 видов", "a bearing pedestal housing"), "cad_ring_flange": ("Фланец · 6 видов", "a ring flange"), "gear": ("Шестерня", "a blue spur gear"), "nut": ("Гайка", "a hexagonal nut")}
     manifest = {}
     if (base / "sources.json").exists():
         manifest = {r["file"]: r for r in json.loads((base / "sources.json").read_text())}
