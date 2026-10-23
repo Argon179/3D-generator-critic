@@ -15,19 +15,9 @@ def test_flatness_survives_rotation_scale_and_subdivision():
     assert geometry_report(trimesh.creation.icosphere())['severity']=='none'
 
 
-def test_camera_excuse_cannot_hide_measured_flatness():
-    report=geometry_report(trimesh.creation.box(extents=[1,2,.03]))
-    critique={'summary_ru':'Всё согласовано','camera_mismatch':True,'issues':[],
-              'should_edit':True,'base_description':'a cat','target_description':'a fat cat'}
-    result=enforce_geometry_warning(critique,report)
-    assert 'малая толщина' in result['summary_ru']
-    assert result['issues'] and not result['should_edit']
-    assert result['target_description']=='a cat'
-
-
-def test_vlm_flatness_disagreement_is_explicit_for_volumetric_mesh():
-    report=geometry_report(trimesh.creation.icosphere())
-    c={'summary_ru':'Вся модель плоская','issues':[],'base_description':'a ball','target_description':'a ball'}
-    result=enforce_geometry_warning(c,report)
-    assert result['quality_warnings']
-    assert result['summary_ru']==c['summary_ru']  # Preserve the actual VLM verdict.
+def test_metrics_never_override_vlm_edit_decision():
+    for mesh in [trimesh.creation.icosphere(),trimesh.creation.box(extents=[1,2,.03])]:
+        for operation in ['add','remove','reshape','none']:
+            c={'summary_ru':'Лишняя плоская поверхность','issues':[], 'edit_type':operation,
+               'should_edit':operation!='none','base_description':'a frog','target_description':'a frog without an extra sheet'}
+            assert enforce_geometry_warning(c,geometry_report(mesh))==c

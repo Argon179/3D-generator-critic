@@ -8,6 +8,7 @@ import sys
 import traceback
 import re
 from pathlib import Path
+from typing import Literal
 
 import numpy as np
 import trimesh
@@ -23,6 +24,7 @@ class Critique(BaseModel):
     summary_ru: str=Field(max_length=2000)
     camera_mismatch: bool
     confidence: float=Field(ge=0,le=1)
+    edit_type: Literal["none","add","remove","reshape","repair"]|None=None
     should_edit: bool
     issues: list[dict]=Field(default_factory=list,max_length=10)
     quality_warnings: list[str]=Field(default_factory=list,max_length=3)
@@ -38,9 +40,10 @@ class Critique(BaseModel):
 
     @model_validator(mode='after')
     def consistent_edit(self):
-        if self.camera_mismatch or not self.issues:
+        if self.camera_mismatch or not self.issues or self.edit_type=='none':
             self.should_edit=False
         if not self.should_edit:
+            self.edit_type='none'
             self.target_description=self.base_description
         return self
 
@@ -235,9 +238,6 @@ def execute(run_id):
             if number:
                 accepted,reason=acceptance(previous_report,report,cfg['acceptance_margin'])
                 if critique.camera_mismatch:accepted=False;reason+='; критик обнаружил несогласование камеры'
-                if critique.quality_warnings:accepted=False;reason+='; противоречивая оценка объёма'
-                if report['geometry']['severity']!='none' and report['geometry']['thickness_ratio']<previous_report['geometry']['thickness_ratio']:
-                    accepted=False;reason+='; усилилась плоскостность сетки'
             item={'backend':backend,'number':number,'path':str(current.relative_to(ROOT)),'mesh':str(mesh.relative_to(ROOT)),'metrics':report,'critique':critique.model_dump(),'accepted':accepted,'decision':reason}
             iterations.append(item);update_run(run_id,iterations=iterations)
             event(run_id,reason)
@@ -251,10 +251,8 @@ def execute(run_id):
             stop_reason=None
             if number>=params['iterations']:
                 stop_reason='Достигнут выбранный лимит итераций'
-            elif report['geometry']['severity']!='none':
-                stop_reason='Автоправка пропущена: обнаружена малая толщина. Нужна проверка объёма и повторная генерация.'
-            elif critique.quality_warnings:
-                stop_reason='Автоправка пропущена: оценка VLM расходится с численной проверкой объёма'
+            elif critique.should_edit and critique.edit_type in {'remove','repair'}:
+                stop_reason='VLM запросила удаление лишних поверхностей или ремонт сетки. TextDeformer не меняет топологию; операция не подменяется добавлением объёма.'
             elif critique.camera_mismatch:
                 stop_reason='Правка пропущена: критик указал несогласование камеры'
             elif not critique.should_edit:

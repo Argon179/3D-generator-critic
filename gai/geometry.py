@@ -48,16 +48,5 @@ def geometry_report(mesh):
 
 
 def enforce_geometry_warning(data, report):
-    data=dict(data)
-    words=(data.get('summary_ru','')+' '+str(data.get('issues',[]))).lower().replace('ё','е')
-    if report['severity']=='none' and report.get('flat_cap_fraction',0)<.18 and any(w in words for w in ['плоск','flat','sheet']):
-        data['quality_warnings']=['VLM указывает на плоскостность, но численная проверка не обнаруживает глобально тонкую сетку или крупный плоский срез. Оценки расходятся: проверьте независимые виды. Глобальная толщина не исключает локальных дефектов.']
-    if report['severity']=='none':
-        return data
-    data['summary_ru']=(report['warning_ru']+' Оценка VLM: '+data['summary_ru'])[:2000]
-    data['issues']=[{'part':'Объём / толщина','observation_ru':report['warning_ru'],
-                    'suggestion_ru':'Проверьте независимые виды; при сплющенной фигурке повторите генерацию по другому ракурсу.'},*data.get('issues',[])][:10]
-    # A generic CLIP deformation is not a reliable way to reconstruct a missing side.
-    data['should_edit']=False
-    data['target_description']=data['base_description']
-    return data
+    """Compatibility entry point: diagnostics never rewrite a VLM decision."""
+    return dict(data)
