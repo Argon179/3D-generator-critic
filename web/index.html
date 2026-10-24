@@ -13,6 +13,7 @@
 <details id="viewSides"><summary>Сводка разметки сторон</summary><p class="hint">Назначьте стороны прямо под фотографиями или в списках ниже. Каждая сторона соответствует одному снимку. Если стороны не назначены, используются известные углы относительно главного фото. При ручном выборе неназначенные стороны пропускаются. Для Hunyuan главное фото должно быть видом спереди. Оставьте хотя бы один дополнительный снимок для проверки.</p><div id="sideSelectors"></div></details>
 <label>Описание объекта на английском<input id="prompt" placeholder="a yellow rubber duck" maxlength="200"></label>
 <div class="form-row"><label>Фон<select id="background"><option value="black">Удалить чёрный</option><option value="rembg">Автоматически · U²-Net</option><option value="white">Удалить белый</option><option value="alpha">Уже прозрачный</option></select></label><label>Правок<select id="iterations"><option value="0">Только оценка</option><option value="1" selected>До 1</option><option value="2">До 2</option><option value="3">До 3</option></select></label></div>
+<label>Метод доработки<select id="editor"><option value="standard">Локальные правки и реконструкция</option><option value="diffusion">Stable Diffusion · доработка сетки (эксперимент)</option></select></label><p class="hint">Нейросетевой режим изменяет существующую сетку; VLM выбирает правку. Добавление новых частей не поддерживается.</p>
 <details><summary>Дополнительные параметры</summary><label>Seed<input id="seed" type="number" min="0" max="2147483647" value="42"></label><label>Общая область объекта · x,y,w,h<input id="crop" placeholder="Например: 0.25,0.2,0.5,0.5"></label><p class="hint">Координаты от 0 до 1. Одна область применяется ко всем фото. Для движущейся детали лучше заранее подготовить отдельные маски.</p></details>
 <button id="start" class="primary">Создать модель <span>↗</span></button><div id="formError" class="error"></div>
 <div class="aside-note">Основной режим — Hunyuan по нескольким сторонам. DA3 — экспериментальная реконструкция глубины и камер. «Авто» использует прежнюю реконструкцию по силуэтам или SF3D. VLM выбирает локальную правку или повторную генерацию; каждый кандидат проверяется до принятия.</div>
@@ -33,4 +34,4 @@
 </section>
 </main>
 <dialog id="health"><div class="card-top"><h2>Окружение</h2><button id="closeHealth" class="ghost">✕</button></div><div id="healthChecks"></div><p class="hint">SF3D требует принятия условий Hugging Face. Проверка импортов не подтверждает наличие весов.</p><button id="refreshHealth" class="ghost">Проверить снова</button></dialog>
-<script src="/i18n.js?v=2"></script><script src="/app.js?v=bilingual-5"></script></body></html>
+<script src="/i18n.js?v=2"></script><script src="/app.js?v=neural-editor-7"></script></body></html>

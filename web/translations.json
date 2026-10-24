@@ -335,5 +335,10 @@
   "Повторная проверка итерации 2: краткое английское A/B-сравнение, небольшие улучшения учитываются, сбой JSON отделён от несовпадения камеры": "Rechecking iteration 2: concise English A/B comparison, small improvements count, and invalid JSON is distinguished from camera mismatch.",
   "Незавершённая проверка снимков: ": "Incomplete assessment of views: ",
   "Итерация 2 принята по независимым контрольным метрикам и структуре сетки. VLM неуверенна: одно замечание к виду 1 не подтверждено другими видами; оно сохранено в отчёте. Контрольный IoU 88.0% → 92.6%.": "Iteration 2 accepted by independent control metrics and mesh checks. VLM is uncertain: a concern in view 1 is not corroborated by other views and remains in the report. Control IoU: 88.0% → 92.6%.",
-  "Русский перевод не готов; доступен английский оригинал.": "Russian translation is pending; the English original is available."
+  "Русский перевод не готов; доступен английский оригинал.": "Russian translation is pending; the English original is available.",
+  "Метод доработки": "Refinement method",
+  "Локальные правки и реконструкция": "Local edits and reconstruction",
+  "Stable Diffusion · доработка сетки (эксперимент)": "Stable Diffusion · mesh refinement (experimental)",
+  "Нейросетевой режим изменяет существующую сетку; VLM выбирает правку. Добавление новых частей не поддерживается.": "The neural mode deforms the existing mesh; VLM chooses the edit. Adding new parts is not supported.",
+  "нейросетевая доработка сетки (Stable Diffusion)": "neural mesh refinement (Stable Diffusion)"
 }

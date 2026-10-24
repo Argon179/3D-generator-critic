@@ -1,5 +1,5 @@
 """Finite feasible actions: the language model selects a token, code compiles a plan."""
-LABELS={'A':'fit_silhouette','B':'local_smooth','R':'regenerate','L':'local_review','N':'none','C':'camera_mismatch'}
+LABELS={'M':'neural_refine','A':'fit_silhouette','B':'local_smooth','R':'regenerate','L':'local_review','N':'none','C':'camera_mismatch'}
 
 
 def global_pairs(pairs,limit=3):
@@ -36,6 +36,7 @@ def decision_data(label,probabilities,proposal_id,permitted,reason_ru=None):
     if not 0<=confidence<=1:raise ValueError('Invalid action probability')
     if not reason_ru:
         reason_ru={'fit_silhouette':'VLM chose local contour fitting using the selected views.',
+                   'neural_refine':'VLM chose photo-anchored diffusion deformation of the existing mesh.',
                    'local_smooth':'VLM chose local surface smoothing of the selected region.',
                    'regenerate':'VLM chose reconstruction from the original photos because local editing is insufficient.',
                    'none':'VLM found no useful local operation for this region.',

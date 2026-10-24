@@ -38,5 +38,9 @@
   "qwen_label_max_pixels": 36864,
   "qwen_review_model": "Qwen/Qwen3-VL-4B-Instruct",
   "qwen_review_revision": "ebb281ec70b05090aa6165b016eac8ec08e71b17",
-  "qwen_review_max_pixels": 524288
+  "qwen_review_max_pixels": 524288,
+  "neural_editor_enabled": false,
+  "neural_editor_model": "stable-diffusion-v1-5/stable-diffusion-v1-5",
+  "neural_editor_revision": "451f4fe16113bff5a5d2269ed5ad43b0592e9a14",
+  "neural_editor_steps": 60
 }

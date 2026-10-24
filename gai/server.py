@@ -7,6 +7,7 @@ import shutil
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Literal
 from urllib.parse import urlparse
 
 from fastapi import FastAPI, HTTPException, Request, UploadFile, File
@@ -74,6 +75,7 @@ class RunRequest(BaseModel):
     iterations:int=Field(default=1,ge=0,le=3)
     background:str='rembg'
     generator:str='auto'
+    editor:Literal['standard','diffusion']='standard'
     view_sides:dict[str,int]|None=None
     crop:list[float]|None=None
 
@@ -133,12 +135,15 @@ def create_run(body:RunRequest):
     if missing:raise HTTPException(409,'Веса ещё не полностью загружены: '+', '.join(missing)+'. Дождитесь завершения загрузки; инструкция — в README.md.')
     ordered=[body.generation_index]+[i for i in indexes if i!=body.generation_index]
     refs=[dict(dataset['images'][i],path=str(ROOT/dataset['images'][i]['path']),crop=body.crop) for i in ordered]
+    from gai.neural_edit import editor_config
+    try:run_config=editor_config(config(),body.editor)
+    except ValueError as exc:raise HTTPException(400,str(exc)) from exc
     ident=uuid.uuid4().hex[:12];folder=run_dir(ident);folder.mkdir(parents=True)
     inputs=folder/'source_images';inputs.mkdir()
     for i,ref in enumerate(refs):
         source=Path(ref['path']);dest=inputs/f'view_{i:02d}{source.suffix.lower()}'
         shutil.copy2(source,dest);ref.update(original_path=ref['path'],path=str(dest))
-    state={'id':ident,'name':dataset['name'],'created_at':now(),'updated_at':now(),'status':'queued','stage':'queued','parameters':body.model_dump(),'config':config(),'references':refs,'iterations':[],'events':[]}
+    state={'id':ident,'name':dataset['name'],'created_at':now(),'updated_at':now(),'status':'queued','stage':'queued','parameters':body.model_dump(),'config':run_config,'references':refs,'iterations':[],'events':[]}
     save_json(folder/'state.json',state);event(ident,'Запуск поставлен в очередь')
     executor.submit(execute,ident)
     return read_run(ident)
@@ -163,6 +168,7 @@ def get_run(ident:str):
 
 class RefineRequest(BaseModel):
     iterations:int=Field(default=3,ge=1,le=3)
+    editor:Literal['standard','diffusion']='standard'
 
 
 @app.post('/api/runs/{ident}/refine')
@@ -171,7 +177,7 @@ def refine_saved_run(ident:str,body:RefineRequest):
     try:
         problems=[c for c in weight_checks() if not c['ok'] and 'qwen' in c.get('name','').lower()]
         if problems:raise ValueError('Веса критика ещё не установлены')
-        state=create_refinement(ident,body.iterations)
+        state=create_refinement(ident,body.iterations,editor=body.editor)
     except (ValueError,FileNotFoundError) as exc:raise HTTPException(400,str(exc)) from exc
     executor.submit(execute,state['id'],resume_critique=True)
     return state

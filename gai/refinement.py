@@ -4,7 +4,9 @@ from pathlib import Path
 from gai.core import ROOT,RUNS,config,now,read_run,run_dir,save_json
 
 
-def create_refinement(parent_id,iterations=3):
+def create_refinement(parent_id,iterations=3,editor="standard"):
+    from gai.neural_edit import editor_config
+    run_config=editor_config(config(),editor)
     parent=read_run(parent_id)
     if parent['status'] not in {'completed','failed','cancelled'}:raise ValueError('Сначала дождитесь завершения исходного запуска')
     accepted=[i for i in parent.get('iterations',[]) if i.get('accepted')]
@@ -36,10 +38,10 @@ def create_refinement(parent_id,iterations=3):
         generation=run_dir(parent_id)/'generation_job.json'
         if generation.is_file():
             job=json.loads(generation.read_text());job.update(references=raw,out=str(initial));save_json(folder/'generation_job.json',job)
-        params=dict(parent['parameters'],iterations=iterations)
+        params=dict(parent['parameters'],iterations=iterations,editor=editor)
         state={'id':ident,'name':parent['name'].split(' · уточнение')[0]+' · уточнение','created_at':now(),'updated_at':now(),
             'status':'queued','stage':'critique','iteration':0,'initial_mesh_import':True,'parent_run':parent_id,
-            'parameters':params,'config':config(),'references':raw,'iterations':[],
+            'parameters':params,'config':run_config,'references':raw,'iterations':[],
             'preview_mesh':str((initial/'mesh.obj').relative_to(ROOT)),'source_glb':str((initial/'generated.glb').relative_to(ROOT)),
             'best_mesh':str((folder/'best.glb').relative_to(ROOT)),
             'events':[{'time':now(),'message':'Уточнение сохранённой модели из запуска '+parent_id+'; генерация не повторяется'}]}

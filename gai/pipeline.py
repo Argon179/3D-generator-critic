@@ -85,9 +85,10 @@ def criticize(run_id, folder, refs, metrics, prompt, cfg):
         excluded={tuple(x) for x in cfg.get('_excluded_edits',[])}
         excluded_operations=set(cfg.get('_excluded_operations',[]))
         generation_file=folder.parent/'generation_job.json'
-        can_regenerate=generation_file.is_file() and json.loads(generation_file.read_text()).get('backend')=='hunyuan'
+        can_neural=cfg.get('neural_editor_enabled',False)
+        can_regenerate=not can_neural and generation_file.is_file() and json.loads(generation_file.read_text()).get('backend')=='hunyuan'
         for candidate in catalog['proposals']:
-            candidate['permitted_operations']=[op for op in ['fit_silhouette','local_smooth']+(['regenerate'] if can_regenerate else []) if (op,candidate['id']) not in excluded and op not in excluded_operations]
+            candidate['permitted_operations']=[op for op in ['fit_silhouette','local_smooth']+(['neural_refine'] if can_neural else [])+(['regenerate'] if can_regenerate else []) if (op,candidate['id']) not in excluded and op not in excluded_operations]
         catalog['proposals']=[p for p in catalog['proposals'] if p['permitted_operations']]
         evidence_views={v['reference_index']:v for v in catalog['views']}
         for pair in selected:
@@ -157,6 +158,22 @@ def edit(run_id,mesh,folder,critique,cfg):
         elif critique.edit_plan.operation=='local_smooth' and critique.edit_plan.evidence_basis=='silhouette_catalog':
             from gai.shape_fit import smooth_mesh
             candidate=smooth_mesh(mesh,source,folder/'local_edit',critique.edit_plan.proposal_id)
+        elif critique.edit_plan.operation=='neural_refine':
+            if not cfg.get('neural_editor_enabled',False):raise UnsupportedEdit('Neural editor is disabled')
+            from gai.neural_edit import prepare_neural_edit
+            prepare_neural_edit(mesh,source,critique.edit_plan.proposal_id)
+            job=folder/'neural_edit_job.json'
+            save_json(job,{'mesh':str(mesh),'source':str(source),'out':str(folder/'local_edit'),
+                'proposal_id':critique.edit_plan.proposal_id,'description':critique.base_description,
+                'instruction':critique.edit_plan.reason_en or critique.edit_plan.reason_ru,
+                'model':cfg['neural_editor_model'],'revision':cfg['neural_editor_revision'],
+                'steps':cfg.get('neural_editor_steps',60),'resolution':256,'seed':42})
+            try:command(run_id,[local_path(cfg['textdeformer_python']),ROOT/'gai/workers/neural_edit_worker.py',job],timeout=3600)
+            except RuntimeError:
+                failure=folder/'local_edit/neural_error.json'
+                if failure.is_file():raise UnsupportedEdit('Neural editor: '+json.loads(failure.read_text())['error'])
+                raise
+            candidate=folder/'local_edit/mesh.obj'
         elif critique.edit_plan.operation=='regenerate':
             # A new candidate from the same inputs; never pretend a deformation adds topology.
             job_data=json.loads((folder.parent/'generation_job.json').read_text())
@@ -320,7 +337,7 @@ def execute(run_id, resume_critique=False):
             views=json.loads((current/'renders/views.json').read_text()) if (current/'renders/views.json').exists() else []
             report['audit_views']=[dict(v,path=str((current/'renders'/v['file']).relative_to(ROOT))) for v in views if (v['azimuth_deg'] in (0,90,180,270) and v['elevation_deg']==0) or abs(v['elevation_deg'])==90]
             report['geometry']=geometry_report(trimesh.load(mesh,force='mesh',process=True))
-            if number and previous_critique.edit_plan and previous_critique.edit_plan.operation=='fit_silhouette':
+            if number and previous_critique.edit_plan and previous_critique.edit_plan.operation in {'fit_silhouette','neural_refine'}:
                 trained={r.reference_index for r in previous_critique.edit_plan.regions}
                 for pair in report['pairs']:pair['used_for_edit']=pair['reference_index'] in trained
             prior_inputs={p['reference_index'] for p in previous_report['pairs'] if p.get('used_for_edit',False)} if number else {i for i,r in enumerate(refs) if r.get('used_for_edit',False)}
@@ -337,14 +354,14 @@ def execute(run_id, resume_critique=False):
             if number:
                 localized=previous_critique.edit_plan is not None
                 control_before=previous_report
-                if previous_critique.edit_plan and previous_critique.edit_plan.operation=='fit_silhouette':
+                if previous_critique.edit_plan and previous_critique.edit_plan.operation in {'fit_silhouette','neural_refine'}:
                     trained={r.reference_index for r in previous_critique.edit_plan.regions}
                     control_before=dict(previous_report,pairs=[dict(p,used_for_edit=p.get('used_for_edit',False) or p['reference_index'] in trained) for p in previous_report['pairs']])
                     report['edit_training_views']=sorted(trained)
                 if previous_critique.edit_plan and previous_critique.edit_plan.operation=='regenerate' and generation_report.is_file():
                     inputs=set(json.loads(generation_report.read_text()).get('generation_views',[]))
                     control_before=dict(previous_report,pairs=[dict(p,used_for_generation=p.get('used_for_generation',p['reference_index']==0) or p['reference_index'] in inputs) for p in previous_report['pairs']])
-                accepted,reason=acceptance(control_before,report,cfg['acceptance_margin'],require_improvement=(not localized or previous_critique.edit_plan.operation=='regenerate'))
+                accepted,reason=acceptance(control_before,report,cfg['acceptance_margin'],require_improvement=(not localized or previous_critique.edit_plan.operation in {'regenerate','neural_refine'}))
                 fitting=current/'local_edit/edit_report.json'
                 if fitting.is_file():
                     fit_data=json.loads(fitting.read_text())

@@ -419,3 +419,49 @@ views block it as well; one isolated concern is retained as a visible warning.
 This route is never used for local contour fitting and does not claim visual
 confirmation when the VLM is uncertain. These checks remain approximations of
 shape quality, not a guarantee of correct hidden geometry.
+
+### Experimental correction of an existing mesh with Stable Diffusion
+
+The **Refinement method / Метод доработки** selector offers an optional diffusion
+mesh editor. Select **Stable Diffusion · mesh refinement (experimental)** before
+creating a run or clicking **Refine this model**. Standard editing remains the default.
+In diffusion mode the VLM can choose `neural_refine` alongside contour fitting and smoothing; reconstruction from scratch is disabled in this mode.
+Choosing this mode does not force every VLM proposal to use diffusion.
+
+Unlike reconstruction, this editor receives the existing OBJ mesh, a compiled
+VLM-selected vertex region, at least two aligned training photos and the English
+critique. A frozen Stable Diffusion 1.5 prior supplies SDS gradients through a
+differentiable nvdiffrast renderer and VAE. Photo silhouette anchors and displacement
+regularization constrain those gradients. Only selected interior vertices move
+(up to 4% of object span); the exterior and boundary remain fixed. Connectivity is
+unchanged. This is our **experimental optimization backend**, not an official
+pretrained mesh-to-mesh repair network. Stable Diffusion itself processes rendered
+images, not raw mesh tokens. It cannot add a new component or remove a handle.
+
+Install after the existing TextDeformer environment is ready:
+
+```bash
+.venvs/textdeformer/bin/python scripts/setup_neural_editor.py
+```
+
+This downloads pinned FP16 SD 1.5 components to the project Hugging Face cache.
+Execution is local and sequential with other GPU stages. A single view is processed
+at 256 px per diffusion step. The generated candidate still needs independent VLM,
+held-out contour and mesh checks; training photos are excluded from control metrics.
+If optimization fails or produces no legal change, the previous mesh is retained.
+The step history, actual conditioning text, revision, runtime and peak VRAM are
+saved in `local_edit/edit_report.json` and visible in the stage inventory.
+
+Research sources: [MeshUp](https://github.com/threedle/MeshUp) demonstrates
+mesh-conditioned diffusion deformation, but its documented test GPU has 48 GB
+VRAM. [Text2Mesh](https://github.com/threedle/text2mesh) optimizes a mesh using
+neural image supervision and documents an 8 GB GPU minimum; its old CUDA/Kaolin
+stack is not installed into the main application. Our lightweight SDS backend uses
+[SD 1.5](https://huggingface.co/stable-diffusion-v1-5/stable-diffusion-v1-5),
+not either project's official inference implementation. The SD weights retain their
+CreativeML Open RAIL-M license. Photo alignment errors and semantic hallucinations
+remain possible, so diffusion output never bypasses acceptance checks.
+
+Measured development trials and their limits are recorded in
+[docs/neural_editor_trials.md](docs/neural_editor_trials.md). They confirm GPU
+feasibility, but have not demonstrated a substantial improvement on held-out views.

@@ -17,7 +17,7 @@ class Region(BaseModel):
 
 
 class EditPlan(BaseModel):
-    operation: Literal['none','local_scale','local_smooth','remove_region','repair_mesh','regenerate','fit_silhouette'] = 'none'
+    operation: Literal['none','local_scale','local_smooth','remove_region','repair_mesh','regenerate','fit_silhouette','neural_refine'] = 'none'
     proposal_id: str|None = Field(default=None,max_length=80)
     evidence_basis: Literal['vlm_boxes','silhouette_catalog']='vlm_boxes'
     reason_en: str|None = None
@@ -28,9 +28,9 @@ class EditPlan(BaseModel):
 
     @model_validator(mode='after')
     def independent_regions(self):
-        if self.operation=='fit_silhouette' and (self.evidence_basis!='silhouette_catalog' or not self.proposal_id):
+        if self.operation in {'fit_silhouette','neural_refine'} and (self.evidence_basis!='silhouette_catalog' or not self.proposal_id):
             raise ValueError('Contour fitting requires a compiled proposal ID')
-        if self.evidence_basis=='silhouette_catalog' and self.operation not in {'fit_silhouette','local_smooth','regenerate','none'}:
+        if self.evidence_basis=='silhouette_catalog' and self.operation not in {'fit_silhouette','local_smooth','regenerate','neural_refine','none'}:
             raise ValueError('Catalog evidence cannot authorize free-form mesh operations')
         ids=[r.reference_index for r in self.regions]
         if len(ids)!=len(set(ids)):
@@ -41,7 +41,7 @@ class EditPlan(BaseModel):
 def compatible_plan(edit_type,operation):
     if operation=='none':return True
     return operation in {
-        'none':{'none'}, 'reshape':{'local_scale','local_smooth','fit_silhouette','regenerate'},
+        'none':{'none'}, 'reshape':{'local_scale','local_smooth','fit_silhouette','regenerate','neural_refine'},
         'remove':{'remove_region'}, 'repair':{'repair_mesh'},
         'add':{'regenerate'},
     }.get(edit_type,set())
@@ -128,7 +128,7 @@ def validate_critic_report(data,base_description,observations):
 
 
 class ProposalChoice(BaseModel):
-    action: Literal['fit_silhouette','local_smooth','regenerate','none']
+    action: Literal['fit_silhouette','local_smooth','regenerate','neural_refine','none']
     proposal_id: str|None=None
     camera_mismatch: bool
     confidence: float=Field(ge=0,le=1)
@@ -140,7 +140,7 @@ def compile_choice(data,catalog,base_description,observations):
     proposals={p['id']:p for p in catalog['proposals']}
     if choice.action!='none' and choice.proposal_id not in proposals:
         raise ValueError('Select an existing proposal_id, never invent coordinates')
-    active=choice.action in {'fit_silhouette','local_smooth','regenerate'} and not choice.camera_mismatch and choice.confidence>=.65
+    active=choice.action in {'fit_silhouette','local_smooth','regenerate','neural_refine'} and not choice.camera_mismatch and choice.confidence>=.65
     if active:
         p=proposals[choice.proposal_id]
         if choice.action not in p.get('permitted_operations',['fit_silhouette','local_smooth','regenerate']):raise ValueError('This operation was excluded after an unsuccessful trial')

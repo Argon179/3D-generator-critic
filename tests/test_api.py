@@ -85,7 +85,7 @@ def test_refine_endpoint_queues_existing_mesh_without_generation(monkeypatch):
     import gai.refinement as refinement
     from types import SimpleNamespace
     monkeypatch.setattr(server,'weight_checks',lambda:[])
-    monkeypatch.setattr(refinement,'create_refinement',lambda ident,iterations:{'id':'deedee112233','parent_run':ident,'status':'queued','iterations_requested':iterations})
+    monkeypatch.setattr(refinement,'create_refinement',lambda ident,iterations,editor='standard':{'editor':editor,'id':'deedee112233','parent_run':ident,'status':'queued','iterations_requested':iterations})
     submitted=[]
     monkeypatch.setattr(server,'executor',SimpleNamespace(submit=lambda *args,**kwargs:submitted.append((args,kwargs))))
     result=TestClient(app).post('/api/runs/36312ae42e91/refine',json={'iterations':2})
