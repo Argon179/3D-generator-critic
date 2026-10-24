@@ -36,7 +36,7 @@ def main():
         if name=='base':
             pip('-e','.', 'fast-simplification==0.1.12','pytest','httpx')
         elif name=='qwen':
-            pip('-c','configs/torch-constraints.txt','transformers==4.57.1','accelerate==1.11.0','bitsandbytes==0.48.2','numpy==1.26.4','Pillow>=10,<12')
+            pip('-c','configs/torch-constraints.txt','transformers==4.57.1','accelerate==1.11.0','bitsandbytes==0.48.2','pydantic>=2.10,<3','numpy==1.26.4','Pillow>=10,<12')
         elif name=='sf3d':
             pip('-c','configs/torch-constraints.txt','-r','configs/requirements-sf3d.txt')
             env.update(USE_CUDA='1',TORCH_CUDA_ARCH_LIST=os.environ.get('TORCH_CUDA_ARCH_LIST','8.9'),MAX_JOBS='2')

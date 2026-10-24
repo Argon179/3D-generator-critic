@@ -17,6 +17,8 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from gai.core import ROOT, RUNS, Cancelled, command, config, event, local_path, read_run, run_dir, save_json, update_run
 from gai.metrics import align, acceptance, validation_summary
 from gai.geometry import geometry_report, enforce_geometry_warning
+from gai.critic_schema import EditPlan, compatible_plan
+from gai.local_editor import apply_plan, UnsupportedEdit
 
 
 class Critique(BaseModel):
@@ -25,6 +27,8 @@ class Critique(BaseModel):
     camera_mismatch: bool
     confidence: float=Field(ge=0,le=1)
     edit_type: Literal["none","add","remove","reshape","repair"]|None=None
+    edit_plan: EditPlan|None=None
+    view_assessments: list[dict]=Field(default_factory=list,max_length=24)
     should_edit: bool
     issues: list[dict]=Field(default_factory=list,max_length=10)
     quality_warnings: list[str]=Field(default_factory=list,max_length=3)
@@ -45,6 +49,17 @@ class Critique(BaseModel):
         if not self.should_edit:
             self.edit_type='none'
             self.target_description=self.base_description
+        if self.edit_plan is not None and (not self.should_edit or not compatible_plan(self.edit_type,self.edit_plan.operation)):
+            self.edit_plan=EditPlan(reason_ru='Нет согласованного исполнимого плана')
+        if self.edit_plan and self.edit_plan.regions and self.view_assessments:
+            observations={v.get('reference_index'):v for v in self.view_assessments}
+            for region in self.edit_plan.regions:
+                observation=observations.get(region.reference_index,{})
+                boxes=[d.get('render_bbox') for d in observation.get('defects',[]) if isinstance(d,dict)]
+                supported=any(isinstance(b,list) and len(b)==4 and all(isinstance(x,(int,float)) and abs(x-y)<=.03 for x,y in zip(b,region.bbox)) for b in boxes)
+                if observation.get('camera_mismatch') is not False or not supported:
+                    self.edit_plan=EditPlan(reason_ru='Область не подтверждена наблюдением по этому фото')
+                    break
         return self
 
 
@@ -95,15 +110,14 @@ def render(run_id, mesh, folder, cfg):
 
 def criticize(run_id, folder, refs, metrics, prompt, cfg):
     # Include held-out views, not just the image that generated the mesh.
-    pairs=metrics['pairs'];indexes=np.linspace(0,len(pairs)-1,min(cfg['critic_pairs'],len(pairs)),dtype=int)
+    pairs=metrics['pairs'];indexes=range(len(pairs))
     selected=[]
     for i in indexes:
         p=pairs[i]
-        selected.append({'reference_index':p['reference_index'],'reference':refs[p['reference_index']]['prepared'],'render':str(folder/'renders'/p['render'])})
+        selected.append({'reference_index':p['reference_index'],'reference':refs[p['reference_index']]['prepared'],'render':str(folder/'renders'/p['render']),'camera':{'azimuth_deg':p.get('azimuth_deg'),'elevation_deg':p.get('elevation_deg')}})
     views=json.loads((folder/'renders/views.json').read_text())
     audit=[dict(v,path=str(folder/'renders'/v['file'])) for v in views if v['azimuth_deg'] in (0,90,180,270) and v['elevation_deg']==0]
-    top=next((v for v in views if v['elevation_deg']==90),None)
-    if top:audit.append(dict(top,path=str(folder/'renders'/top['file'])))
+    audit.extend(dict(v,path=str(folder/'renders'/v['file'])) for v in views if abs(v['elevation_deg'])==90)
     geometry=metrics.get('geometry',{})
     job=folder/'critic_job.json'
     save_json(job,{'model':cfg['qwen_model'],'revision':cfg.get('qwen_revision'),'pairs':selected,'audit_views':audit,'geometry':geometry,'base_description':prompt,'out':str(folder)})
@@ -112,13 +126,53 @@ def criticize(run_id, folder, refs, metrics, prompt, cfg):
     # The CLIP source is the caller's fixed description, not a fresh description
     # of the desired reference that the VLM may accidentally repeat as both ends.
     data['base_description']=prompt
+    data.setdefault('edit_plan',{'operation':'none','reason_ru':'VLM не вернула структурированный план'})
+    try:data['edit_plan']=EditPlan.model_validate(data['edit_plan']).model_dump()
+    except (ValueError,TypeError):data['edit_plan']=EditPlan(reason_ru='Некорректный план VLM; изменение не выполняется').model_dump()
     if geometry:data=enforce_geometry_warning(data,geometry)
     critique=Critique.model_validate(data)
     save_json(folder/'critique.json',dict(critique.model_dump(),peak_vram_mb=data.get('peak_vram_mb')))
     return critique
 
 
+def verify_edit(run_id,before,after,refs,report,proposal,cfg):
+    review=after/'verification';review.mkdir(exist_ok=True)
+    job=review/'job.json'
+    pairs=[{'reference_index':p['reference_index'],'reference':refs[p['reference_index']]['prepared'],
+            'before':str(before/'renders'/p['render']),'after':str(after/'renders'/p['render'])} for p in report['pairs']]
+    evidence=[r.reference_index for r in proposal.edit_plan.regions] or [p['reference_index'] for p in pairs]
+    save_json(job,{'mode':'verify','model':cfg['qwen_model'],'revision':cfg.get('qwen_revision'),
+                   'out':str(review),'pairs':pairs,'proposal':proposal.model_dump(),'evidence_indexes':evidence})
+    command(run_id,[local_path(cfg['qwen_python']),ROOT/'gai/workers/qwen_worker.py',job])
+    # Revalidate the raw per-view assessments, not just an untrusted accepted flag.
+    from gai.review import summarize_review
+    data=json.loads((review/'verification.json').read_text())
+    result=summarize_review(data['views'],evidence)
+    if {v['reference_index'] for v in result['views']} != {p['reference_index'] for p in pairs}:
+        raise ValueError('Независимая проверка не охватила все фото')
+    save_json(review/'verification.json',result)
+    return result
+
+
 def edit(run_id,mesh,folder,critique,cfg):
+    if critique.edit_plan is not None:
+        source=folder.parent/f'iteration_{int(folder.name.split("_")[-1])-1:02d}'
+        if critique.edit_plan.operation=='regenerate':
+            # A new candidate from the same inputs; never pretend a deformation adds topology.
+            job_data=json.loads((folder.parent/'generation_job.json').read_text())
+            job_data.update(out=str(folder/'regeneration'),seed=int(job_data['seed'])+int(folder.name.split('_')[-1]))
+            job=folder/'regeneration_job.json';save_json(job,job_data)
+            backend=job_data.get('backend','sf3d')
+            if backend=='da3':raise UnsupportedEdit('DA3 не поддерживает содержательную повторную генерацию по другому seed')
+            worker='multiview_worker.py' if backend in {'hunyuan','da3'} else 'sf3d_worker.py'
+            command(run_id,[local_path(cfg[backend+'_python']),ROOT/'gai/workers'/worker,job],timeout=7200)
+            candidate=folder/'regeneration/mesh.obj'
+            canonical_mesh(folder/'regeneration/generated.glb',candidate,cfg['max_faces'])
+            save_json(folder/'edit_report.json',{'backend':'regeneration','plan':critique.edit_plan.model_dump(),'seed':job_data['seed']})
+        else:
+            candidate=apply_plan(mesh,critique.edit_plan,source,folder/'local_edit')
+        validate_candidate(candidate)
+        return candidate
     job=folder/'edit_job.json'
     save_json(job,{'repo':str(local_path(cfg['textdeformer_repo'])),'mesh':str(mesh),'out':str(folder/'textdeformer'),'base_description':critique.base_description,'target_description':critique.target_description,'epochs':cfg['textdeformer_epochs'],'batch_size':cfg['textdeformer_batch_size'],'train_res':cfg['textdeformer_train_res']})
     command(run_id,[local_path(cfg['textdeformer_python']),ROOT/'gai/workers/edit_worker.py',job],cwd=local_path(cfg['textdeformer_repo']),timeout=7200)
@@ -227,18 +281,29 @@ def execute(run_id):
                 pair['used_for_generation']=refs[pair['reference_index']].get('used_for_generation',pair['reference_index']==0)
                 pair['reference_path']=str(Path(refs[pair['reference_index']]['prepared']).relative_to(ROOT)) if Path(refs[pair['reference_index']]['prepared']).is_absolute() else refs[pair['reference_index']]['prepared']
             views=json.loads((current/'renders/views.json').read_text()) if (current/'renders/views.json').exists() else []
-            report['audit_views']=[dict(v,path=str((current/'renders'/v['file']).relative_to(ROOT))) for v in views if (v['azimuth_deg'] in (0,90,180,270) and v['elevation_deg']==0) or v['elevation_deg']==90]
-            report['geometry']=geometry_report(trimesh.load(mesh,force='mesh',process=False))
+            report['audit_views']=[dict(v,path=str((current/'renders'/v['file']).relative_to(ROOT))) for v in views if (v['azimuth_deg'] in (0,90,180,270) and v['elevation_deg']==0) or abs(v['elevation_deg'])==90]
+            report['geometry']=geometry_report(trimesh.load(mesh,force='mesh',process=True))
             report.update(validation_summary(report))
             save_json(current/'metrics.json',report)
             if baseline_pairs is None:baseline_pairs=report['pairs']
             update_run(run_id,stage='critique')
             critique=criticize(run_id,current,refs,report,current_description,cfg)
             accepted=True;reason='Исходная модель'
+            verification=None
             if number:
-                accepted,reason=acceptance(previous_report,report,cfg['acceptance_margin'])
+                localized=previous_critique.edit_plan is not None
+                accepted,reason=acceptance(previous_report,report,cfg['acceptance_margin'],require_improvement=not localized)
+                if localized:
+                    update_run(run_id,stage='verify')
+                    event(run_id,'Независимая VLM: сравнение референсов с моделью до и после правки')
+                    verification=verify_edit(run_id,previous_folder,current,refs,report,previous_critique,cfg)
+                    accepted=accepted and verification['accepted']
+                    reason+='; '+verification['reason_ru']
                 if critique.camera_mismatch:accepted=False;reason+='; критик обнаружил несогласование камеры'
             item={'backend':backend,'number':number,'path':str(current.relative_to(ROOT)),'mesh':str(mesh.relative_to(ROOT)),'metrics':report,'critique':critique.model_dump(),'accepted':accepted,'decision':reason}
+            if verification is not None:item['verification']=verification
+            for edit_report in (current/'local_edit/edit_report.json',current/'edit_report.json'):
+                if edit_report.exists():item['edit_report']=json.loads(edit_report.read_text())
             iterations.append(item);update_run(run_id,iterations=iterations)
             event(run_id,reason)
             if accepted:
@@ -251,7 +316,7 @@ def execute(run_id):
             stop_reason=None
             if number>=params['iterations']:
                 stop_reason='Достигнут выбранный лимит итераций'
-            elif critique.should_edit and critique.edit_type in {'remove','repair'}:
+            elif critique.should_edit and critique.edit_type in {'remove','repair'} and critique.edit_plan is None:
                 stop_reason='VLM запросила удаление лишних поверхностей или ремонт сетки. TextDeformer не меняет топологию; операция не подменяется добавлением объёма.'
             elif critique.camera_mismatch:
                 stop_reason='Правка пропущена: критик указал несогласование камеры'
@@ -261,16 +326,23 @@ def execute(run_id):
                 stop_reason='Правка пропущена: низкая уверенность критика'
             if stop_reason:
                 event(run_id,stop_reason);break
-            if not meta['can_deform']:
+            if critique.edit_plan is not None and critique.edit_plan.operation in {'local_scale','local_smooth','remove_region'} and not critique.view_assessments:
+                event(run_id,'Правка пропущена: нет наблюдений, подтверждающих локальную область');break
+            if critique.edit_plan is not None and critique.edit_plan.operation=='none':
+                event(run_id,'Правка пропущена: '+critique.edit_plan.reason_ru);break
+            if critique.edit_plan is None and not meta['can_deform']:
                 event(run_id,'Редактирование пропущено: несколько крупных несвязных частей. Требуется подготовка связной сетки.');break
-            if re.findall(r'\w+',critique.target_description.casefold())==re.findall(r'\w+',critique.base_description.casefold()):
+            if critique.edit_plan is None and re.findall(r'\w+',critique.target_description.casefold())==re.findall(r'\w+',critique.base_description.casefold()):
                 event(run_id,'Правка пропущена: одинаковые исходное и целевое описания');break
             update_run(run_id,stage='edit')
-            event(run_id,'TextDeformer: '+critique.target_description)
+            event(run_id,('Локальный план: '+critique.edit_plan.operation) if critique.edit_plan else 'TextDeformer: '+critique.target_description)
             next_folder=folder/f'iteration_{number+1:02d}';next_folder.mkdir(exist_ok=True)
-            previous_report=report
-            mesh=edit(run_id,mesh,next_folder,critique,cfg)
-            current_description=critique.target_description
+            previous_report=report;previous_critique=critique;previous_folder=current
+            try:mesh=edit(run_id,mesh,next_folder,critique,cfg)
+            except UnsupportedEdit as exc:
+                save_json(next_folder/'edit_unavailable.json',{'reason_ru':str(exc),'plan':critique.edit_plan.model_dump() if critique.edit_plan else None})
+                event(run_id,'Локальная правка не выполнена: '+str(exc));break
+            current_description=params['prompt'] if critique.edit_plan else critique.target_description
         update_run(run_id,status='completed',stage='done')
         event(run_id,'Запуск завершён. Исходные изображения и все промежуточные результаты сохранены.')
     except Cancelled:

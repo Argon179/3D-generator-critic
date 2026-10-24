@@ -96,3 +96,58 @@ def test_neural_multiview_bypasses_sf3d_and_marks_holdout(tmp_path,monkeypatch):
     assert state['iterations'][0]['backend']=='Hunyuan3D-2mv'
     assert state['iterations'][0]['metrics']['heldout']['count']==8
     assert not (folder/'iteration_00/sf3d.obj').exists()
+
+
+def test_all_references_reach_critic_including_holdout(tmp_path,monkeypatch):
+    from pathlib import Path
+    folder=tmp_path/'iteration_00';folder.mkdir()
+    core.save_json(folder/'renders/views.json',[])
+    refs=[{'prepared':f'photo{i}.png'} for i in range(7)]
+    metrics={'pairs':[{'reference_index':i,'render':f'{i}.png'} for i in range(7)]}
+    def worker(run_id,args,**kwargs):
+        payload=json.loads(Path(args[-1]).read_text())
+        assert len(payload['pairs'])==7
+        core.save_json(folder/'critique.json',{'summary_ru':'Fixture','camera_mismatch':False,'confidence':.8,
+            'should_edit':False,'base_description':'a sphere','target_description':'a sphere','issues':[]})
+    monkeypatch.setattr(pipeline,'command',worker)
+    result=pipeline.criticize('fixture',folder,refs,metrics,'a sphere',core.config())
+    assert result.edit_plan.operation=='none'
+
+
+def test_local_candidate_needs_vlm_confirmation_even_if_iou_improves(tmp_path,monkeypatch):
+    root=tmp_path/'project';runs=root/'runs';runs.mkdir(parents=True)
+    monkeypatch.setattr(core,'ROOT',root);monkeypatch.setattr(core,'RUNS',runs)
+    monkeypatch.setattr(pipeline,'ROOT',root);monkeypatch.setattr(pipeline,'RUNS',runs)
+    cfg=core.config();ident='aaaabb112233';folder=runs/ident;folder.mkdir()
+    core.save_json(folder/'state.json',{'id':ident,'status':'queued','config':cfg,
+        'parameters':{'seed':42,'background':'alpha','prompt':'a sphere','iterations':1},
+        'references':[{'path':'one.png'},{'path':'two.png'}],'iterations':[],'events':[]})
+    def generate(run_id,args,**kwargs):
+        from pathlib import Path
+        job=json.loads(Path(args[-1]).read_text());out=Path(job['out'])
+        trimesh.creation.icosphere(subdivisions=1).export(out/'generated.glb')
+        core.save_json(out/'references.json',[{'prepared':'one.png'},{'prepared':'two.png'}])
+    monkeypatch.setattr(pipeline,'command',generate)
+    monkeypatch.setattr(pipeline,'render',lambda *args:None)
+    def align(refs,render_dir,fixed=None):
+        score=.7 if render_dir.parent.name=='iteration_00' else .9
+        return {'silhouette_iou':score,'pairs':[{'reference_index':i,'iou':score,'render':'x.png'} for i in range(2)]}
+    monkeypatch.setattr(pipeline,'align',align)
+    critique=pipeline.Critique(summary_ru='Fixture',camera_mismatch=False,confidence=.9,should_edit=True,
+        edit_type='reshape',edit_plan={'operation':'local_smooth'},view_assessments=[{'reference_index':0,'defects':[]}],issues=[{'part':'fixture'}],
+        base_description='a sphere',target_description='a sphere')
+    monkeypatch.setattr(pipeline,'criticize',lambda *args:critique)
+    def edit(run_id,mesh,out,*args):
+        candidate=trimesh.load(mesh);candidate.vertices[:,1]*=1.05
+        path=out/'mesh.obj';candidate.export(path);return path
+    monkeypatch.setattr(pipeline,'edit',edit)
+    checked=[]
+    def verify(*args):
+        checked.append(True);return {'accepted':False,'reason_ru':'Synthetic new defect','views':[]}
+    monkeypatch.setattr(pipeline,'verify_edit',verify)
+    pipeline.execute(ident)
+    state=core.read_run(ident)
+    assert state['status']=='completed',state.get('error')
+    assert checked and [i['accepted'] for i in state['iterations']]==[True,False]
+    assert state['iterations'][1]['verification']['accepted'] is False
+    assert np.isclose(trimesh.load(folder/'best.glb').extents.max(),2)

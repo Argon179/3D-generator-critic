@@ -24,11 +24,12 @@ def stage_inventory(ident):
             number=int(parts[0].split('_')[1]);name=p.name
             if 'sf3d_evaluation' in parts:target=generation
             elif 'reconstruction' in parts:target=stage('reconstruction','Многовидовая реконструкция')
+            elif 'verification' in parts:target=stage(f'verify_{number}',f'Независимая проверка до/после · итерация {number}')
             elif 'renders' in parts or name in {'render_job.json','metrics.json'}:
                 target=stage(f'render_{number}',f'Рендеры и метрики · итерация {number}')
-            elif name in {'critique.json','critic_job.json','raw_response.txt','critic_prompt.txt'}:
+            elif name in {'critique.json','critic_job.json','raw_response.txt','critic_prompt.txt','view_assessments.json'} or name.startswith(('view_','plan_')) and p.suffix in {'.json','.txt'}:
                 target=stage(f'critic_{number}',f'Критик · итерация {number}')
-            elif number>0:target=stage(f'edit_{number}',f'TextDeformer · итерация {number}')
+            elif number>0:target=stage(f'edit_{number}',f'Редактирование · итерация {number}')
             else:target=generation
         else:continue
         item={'path':str(p.relative_to(ROOT)),'label':str(rel),'size':p.stat().st_size}
@@ -47,7 +48,7 @@ def stage_inventory(ident):
         if item.get('backend')=='Многовидовая реконструкция по силуэтам' and 'reconstruction' in stages:
             stages['reconstruction']['comparison']=item
         if item['number']==0 and not (folder/'iteration_00/reconstruction').exists():generation['comparison']=item
-        for key in (f'render_{item["number"]}',f'critic_{item["number"]}'):
+        for key in (f'render_{item["number"]}',f'critic_{item["number"]}',f'verify_{item["number"]}'):
             target=stages.get(key)
             if target:
                 model=ROOT/item['mesh']
@@ -67,5 +68,5 @@ def stage_inventory(ident):
         key=s['id']
         if key in {'inputs','generation','reconstruction'}:return {'inputs':0,'generation':10,'reconstruction':20}[key]
         kind,number=key.rsplit('_',1);number=int(number)
-        return {'render':30+number*30,'critic':40+number*30,'edit':15+number*30}[kind]
+        return {'render':30+number*30,'critic':40+number*30,'edit':15+number*30,'verify':45+number*30}[kind]
     return {'stages':sorted(stages.values(),key=order),'events':state['events']}

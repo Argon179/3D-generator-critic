@@ -71,10 +71,10 @@ def test_boundary_metrics_detect_displaced_outline():
     assert shifted['boundary_f1']<.5 and shifted['contour_distance']>0
 
 
-def test_increased_flat_cap_vetoes_iou_improvement():
+def test_flat_cap_does_not_veto_a_vlm_selected_change():
     before={'pairs':[{'reference_index':0,'iou':.7},{'reference_index':1,'iou':.7}], 'geometry':{'flat_cap_fraction':.05}}
     after={'pairs':[{'reference_index':0,'iou':.8},{'reference_index':1,'iou':.8}], 'geometry':{'flat_cap_fraction':.35}}
-    assert not acceptance(before,after)[0]
+    assert acceptance(before,after)[0]
 
 
 def test_validation_summary_keeps_training_and_holdout_separate():
@@ -93,3 +93,20 @@ def test_holdout_cannot_choose_camera_alignment(tmp_path):
     assert report['camera_training_count']==1
     assert report['pairs'][0]['azimuth_deg']==0
     assert report['pairs'][1]['iou']<.4
+
+
+def test_interior_edit_can_pass_nonregression_but_not_skip_verification():
+    report={'pairs':[{'reference_index':0,'iou':.8},{'reference_index':1,'iou':.8}]}
+    assert not acceptance(report,report)[0]
+    assert acceptance(report,report,require_improvement=False)[0]
+
+
+def test_labeled_top_and_bottom_match_their_actual_cameras(tmp_path):
+    for name in ['side','top','bottom']:
+        rgba(tmp_path/(name+'.png'),(20,10,39,79))
+    save_json(tmp_path/'views.json',[{'file':name+'.png','azimuth_deg':0,'elevation_deg':e} for name,e in [('side',0),('top',90),('bottom',-90)]])
+    refs=[{'prepared':str(tmp_path/(name+'.png')),'view_label':label} for name,label in [('side','front'),('top','top'),('bottom','bottom')]]
+    report=align(refs,tmp_path)
+    assert [p['elevation_deg'] for p in report['pairs']]==[0,90,-90]
+    fixed=align(refs,tmp_path,report['pairs'])
+    assert fixed['silhouette_iou']==1

@@ -6,7 +6,7 @@ import json
 import math
 from pathlib import Path
 import bpy
-from mathutils import Vector
+from mathutils import Vector, Matrix
 
 
 def main():
@@ -46,14 +46,17 @@ def main():
     camera=bpy.data.cameras.new('Camera');cam=bpy.data.objects.new('Camera',camera);scene.collection.objects.link(cam);scene.camera=cam
     camera.type='ORTHO';camera.ortho_scale=3.1;camera.lens=50
     out=Path(job['out']);out.mkdir(parents=True,exist_ok=True);views=[]
-    for elev in sorted(set(job['elevations']) | {0,90}):
-        for az in ([0] if elev==90 else sorted(set(range(0,360,job['step'])) | {0,90,180,270})):
+    for elev in sorted(set(job['elevations']) | {-90,0,90}):
+        for az in ([0] if abs(elev)==90 else sorted(set(range(0,360,job['step'])) | {0,90,180,270})):
             a=math.radians(az);e=math.radians(elev)
             cam.location=Vector((5*math.sin(a)*math.cos(e),-5*math.cos(a)*math.cos(e),5*math.sin(e)))
             cam.rotation_euler=(-cam.location).to_track_quat('-Z','Y').to_euler()
             name=f'az_{az:03d}_el_{elev:02d}.png';scene.render.filepath=str(out/name)
             bpy.ops.render.render(write_still=True)
-            views.append({'file':name,'azimuth_deg':az,'elevation_deg':elev,'camera_location':list(cam.location),'orthographic_scale':camera.ortho_scale})
+            bpy.context.view_layer.update()
+            transform=Matrix(((1,0,0,0),(0,0,-1,0),(0,1,0,0),(0,0,0,1)))
+            projection=cam.calc_matrix_camera(bpy.context.evaluated_depsgraph_get(),x=job['resolution'],y=job['resolution']) @ cam.matrix_world.inverted() @ transform
+            views.append({'projection_matrix':[list(row) for row in projection],'file':name,'azimuth_deg':az,'elevation_deg':elev,'camera_location':list(cam.location),'orthographic_scale':camera.ortho_scale})
     (out/'views.json').write_text(json.dumps(views,indent=2))
 
 
