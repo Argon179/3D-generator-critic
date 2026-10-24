@@ -1,5 +1,23 @@
 """Strict validation of independently generated before/after assessments."""
 from pydantic import BaseModel,StrictBool,Field
+from typing import Literal
+
+
+class BlindReview(BaseModel):
+    preferred:Literal['A','B','tie']
+    camera_mismatch:StrictBool
+    a_has_unique_defect:StrictBool
+    b_has_unique_defect:StrictBool
+    confidence:float=Field(ge=0,le=1)
+    explanation_ru:str=Field(min_length=3,max_length=2000)
+
+
+def unblind_review(data,index,after_label):
+    review=BlindReview.model_validate(data)
+    return ViewReview(reference_index=index,camera_mismatch=review.camera_mismatch,
+        improved=review.preferred==after_label,
+        worsened=review.preferred not in {after_label,'tie'} or getattr(review,after_label.lower()+'_has_unique_defect'),
+        confidence=review.confidence,explanation_ru=review.explanation_ru).model_dump()
 
 
 class ViewReview(BaseModel):

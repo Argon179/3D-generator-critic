@@ -156,7 +156,8 @@ def command(run_id, args, cwd=None, timeout=3600):
 def weight_checks(cfg=None):
     cfg=cfg or config()
     checks=[]
-    for prefix,count in [('sf3d',1),('qwen',2)]:
+    models=[('sf3d',1),('qwen',2)]+([('qwen_review',2)] if cfg.get('qwen_review_model') else [])
+    for prefix,count in models:
         name=cfg[prefix+'_model'].replace('/','--')
         snapshot=ROOT/'.cache/huggingface/hub'/('models--'+name)/'snapshots'/cfg[prefix+'_revision']
         present=[p for p in snapshot.glob('*.safetensors') if p.is_file()]

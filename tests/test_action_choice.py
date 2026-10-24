@@ -28,3 +28,14 @@ def test_global_reconstruction_compiles_full_views_without_local_vertex_selectio
     result=compile_choice(decision,{'proposals':[proposal]},'a technical part',[])
     assert result['should_edit'] and result['edit_plan']['operation']=='regenerate'
     assert len(result['edit_plan']['regions'])==3
+
+
+def test_global_reconstruction_and_refusal_override_local_conditional_confidence():
+    from gai.action_choice import select_report
+    local={'confidence':.999,'should_edit':True,'action':'local'}
+    global_plan={'confidence':.95,'should_edit':True,'action':'regenerate'}
+    assert select_report([local,global_plan],global_plan) is global_plan
+    refusal={'confidence':.9,'should_edit':False,'camera_mismatch':True}
+    assert select_report([local,refusal],refusal) is refusal
+    assert select_report([local],dict(refusal,confidence=.5)) is local
+    with pytest.raises(ValueError):decision_data('L',{'L':.9},None,['local_review'])

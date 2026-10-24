@@ -133,14 +133,15 @@ def verify_edit(run_id,before,after,refs,report,proposal,cfg):
                 im=im.resize((max(1,im.width*384//max(im.size)),max(1,im.height*384//max(im.size))))
                 destination=review/f'view_{idx:02d}_{key}.png';im.save(destination);pair[key]=str(destination)
     evidence=[r.reference_index for r in proposal.edit_plan.regions] or [p['reference_index'] for p in pairs]
-    save_json(job,{'mode':'verify','model':cfg['qwen_model'],'revision':cfg.get('qwen_revision'),
-                   'out':str(review),'max_pixels':cfg.get('qwen_max_pixels',384*384),'pairs':pairs,'proposal':proposal.model_dump(),'evidence_indexes':evidence})
+    if proposal.edit_plan.operation=='regenerate':evidence=[p['reference_index'] for p in pairs]
+    save_json(job,{'mode':'verify','model':cfg.get('qwen_review_model',cfg['qwen_model']),'revision':cfg.get('qwen_review_revision',cfg.get('qwen_revision')),
+                   'out':str(review),'max_pixels':cfg.get('qwen_review_max_pixels',cfg.get('qwen_max_pixels',384*384)),'pairs':pairs,'proposal':proposal.model_dump(),'evidence_indexes':evidence})
     command(run_id,[local_path(cfg['qwen_python']),ROOT/'gai/workers/qwen_worker.py',job])
     # Revalidate the raw per-view assessments, not just an untrusted accepted flag.
     from gai.review import summarize_review
     data=json.loads((review/'verification.json').read_text())
     result=summarize_review(data['views'],evidence)
-    result.update({k:data[k] for k in ['model','revision','peak_vram_mb'] if k in data})
+    result.update({k:data[k] for k in ['model','revision','peak_vram_mb','protocol'] if k in data})
     if {v['reference_index'] for v in result['views']} != {p['reference_index'] for p in pairs}:
         raise ValueError('Независимая проверка не охватила все фото')
     save_json(review/'verification.json',result)

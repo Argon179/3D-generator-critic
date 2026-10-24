@@ -90,3 +90,15 @@ def test_verifier_is_not_primed_with_critic_verdict():
     text=json.dumps(context)
     assert 'definitely' not in text and 'must agree' not in text and 'confidence' not in text
     assert context['operation']=='fit_silhouette' and context['reference_indexes']==[2]
+
+
+def test_blind_review_unblinds_counterbalanced_order_and_rejects_new_defects():
+    from gai.review import unblind_review
+    data={'preferred':'A','camera_mismatch':False,'a_has_unique_defect':False,'b_has_unique_defect':True,'confidence':.9,'explanation_ru':'Visible difference'}
+    assert unblind_review(data,1,'A')['improved']
+    assert not unblind_review(data,1,'A')['worsened']
+    assert unblind_review(data,0,'B')['worsened']
+    assert not unblind_review(data,0,'B')['improved']
+    data.update(preferred='tie',b_has_unique_defect=False)
+    assert not unblind_review(data,0,'B')['improved']
+    assert not unblind_review(data,0,'B')['worsened']
