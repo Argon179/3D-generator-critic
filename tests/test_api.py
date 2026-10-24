@@ -93,3 +93,19 @@ def test_refine_endpoint_queues_existing_mesh_without_generation(monkeypatch):
     assert result.json()['parent_run']=='36312ae42e91'
     assert submitted[0][1]['resume_critique'] is True
     assert TestClient(app).post('/api/runs/36312ae42e91/refine',json={'iterations':0}).status_code==422
+
+
+def test_translation_routes_are_accessible_before_static_mount(monkeypatch,tmp_path):
+    import gai.server as server
+    from gai.core import save_json
+    ident='abcabc112233';folder=tmp_path/ident;folder.mkdir()
+    monkeypatch.setattr(server,'read_run',lambda _: {'id':ident,'status':'completed','iterations':[]})
+    monkeypatch.setattr(server,'run_dir',lambda _:folder)
+    class Immediate:
+        def submit(self,*args,**kwargs):pass
+    monkeypatch.setattr(server,'executor',Immediate())
+    from fastapi.testclient import TestClient
+    client=TestClient(server.app)
+    assert client.get('/api/runs/'+ident+'/translations').json()['status']=='missing'
+    assert client.post('/api/runs/'+ident+'/translations').json()['status']=='queued'
+    assert client.get('/api/runs/'+ident+'/translations').json()['status']=='queued'

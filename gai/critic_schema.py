@@ -20,6 +20,7 @@ class EditPlan(BaseModel):
     operation: Literal['none','local_scale','local_smooth','remove_region','repair_mesh','regenerate','fit_silhouette'] = 'none'
     proposal_id: str|None = Field(default=None,max_length=80)
     evidence_basis: Literal['vlm_boxes','silhouette_catalog']='vlm_boxes'
+    reason_en: str|None = None
     reason_ru: str = Field(default='',max_length=1500)
     regions: list[Region] = Field(default_factory=list,max_length=12)
     scale: float = Field(default=1,ge=.92,le=1.08)
@@ -48,6 +49,9 @@ def compatible_plan(edit_type,operation):
 
 class Critique(BaseModel):
     model_config=ConfigDict(extra='ignore')
+    text_language: str|None=None
+    translation_status: str|None=None
+    summary_en: str|None=None
     summary_ru: str=Field(max_length=2000)
     camera_mismatch: bool
     confidence: float=Field(ge=0,le=1)
@@ -56,6 +60,7 @@ class Critique(BaseModel):
     view_assessments: list[dict]=Field(default_factory=list,max_length=24)
     should_edit: bool
     issues: list[dict]=Field(default_factory=list,max_length=10)
+    quality_warnings_en: list[str]=Field(default_factory=list,max_length=3)
     quality_warnings: list[str]=Field(default_factory=list,max_length=3)
     base_description: str=Field(min_length=3,max_length=250)
     target_description: str=Field(min_length=3,max_length=250)
@@ -144,5 +149,5 @@ def compile_choice(data,catalog,base_description,observations):
     else:plan=EditPlan(reason_ru=choice.reason_ru)
     return Critique(summary_ru=choice.reason_ru,camera_mismatch=choice.camera_mismatch,confidence=choice.confidence,
         should_edit=active,edit_type='reshape' if active else 'none',edit_plan=plan,
-        issues=[{'part':'selected contour region','observation_ru':choice.reason_ru,'suggestion_ru':('Повторить реконструкцию по исходным фото и проверить все ракурсы.' if choice.action=='regenerate' else 'Применить выбранную локальную операцию; затем проверить остальные виды.')}] if active else [],
+        issues=[{'part':'selected contour region','observation_ru':choice.reason_ru,'suggestion_ru':('Reconstruct from the original photos and check all views.' if choice.action=='regenerate' else 'Apply the selected local operation, then check the remaining views.')}] if active else [],
         base_description=base_description,target_description=base_description,view_assessments=observations).model_dump(mode='json')

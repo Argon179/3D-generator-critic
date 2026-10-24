@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>GAI · 3D Loop</title><link rel="stylesheet" href="/style.css"><link rel="icon" href="/favicon.svg" type="image/svg+xml"></head>
 <body>
-<header><a class="brand" href="/">◈ <strong>GAI</strong><span>3D LOOP</span></a><div class="models">3D <i>→</i> EEVEE <i>→</i> QWEN <i>→</i> TEXTDEFORMER</div><button id="healthButton" class="ghost">Окружение <span id="healthDot">●</span></button></header>
+<header><a class="brand" href="/">◈ <strong>GAI</strong><span>3D LOOP</span></a><div class="models">3D <i>→</i> EEVEE <i>→</i> QWEN <i>→</i> TEXTDEFORMER</div><button id="languageToggle" class="ghost" type="button" aria-label="Переключить на английский">🌐 EN</button><button id="healthButton" class="ghost">Окружение <span id="healthDot">●</span></button></header>
 <main>
 <aside>
 <div class="eyebrow">01 / РЕФЕРЕНСЫ</div><h1>От снимков<br>к объёму.</h1><p class="muted">Один объект. Несколько ракурсов.<br>Проверяем каждое изменение.</p>
@@ -19,7 +19,7 @@
 </aside>
 <section class="workspace">
 <div class="workspace-heading"><div><div class="eyebrow">02 / ЭКСПЕРИМЕНТ</div><h2 id="runTitle">Рабочая область</h2></div><div class="toolbar"><select id="history"><option value="">История запусков</option></select><button id="refine" class="ghost" hidden>Уточнить эту модель</button><button id="cancel" class="ghost" hidden>Остановить</button></div></div>
-<div class="steps" id="steps"><span data-stage="generate">1 Генерация</span><span data-stage="render">2 Рендеры</span><span data-stage="critique">3 Критика</span><span data-stage="edit">4 Правка</span></div>
+<p id="translationNotice" class="hint" hidden aria-live="polite"></p><div class="steps" id="steps"><span data-stage="generate">1 Генерация</span><span data-stage="render">2 Рендеры</span><span data-stage="critique">3 Критика</span><span data-stage="edit">4 Правка</span></div>
 <div id="empty" class="empty"><div class="orb">◈</div><h2>Форма рождается в итерациях</h2><p>Выберите объект и запустите эксперимент.<br>Здесь появятся модель, сравнения и замечания критика.</p><div class="tags"><span>Локально</span><span>4-bit VLM</span><span>История правок</span></div></div>
 <div id="runContent" hidden><div class="status-line"><span id="status" class="badge"></span><span id="stageText" class="muted"></span><a id="logLink" target="_blank">Журнал ↗</a></div><div id="runError" class="error"></div>
 <div id="geometryWarning" class="warning" hidden></div>
@@ -33,4 +33,4 @@
 </section>
 </main>
 <dialog id="health"><div class="card-top"><h2>Окружение</h2><button id="closeHealth" class="ghost">✕</button></div><div id="healthChecks"></div><p class="hint">SF3D требует принятия условий Hugging Face. Проверка импортов не подтверждает наличие весов.</p><button id="refreshHealth" class="ghost">Проверить снова</button></dialog>
-<script src="/app.js?v=blind-review-3"></script></body></html>
+<script src="/i18n.js?v=2"></script><script src="/app.js?v=bilingual-5"></script></body></html>

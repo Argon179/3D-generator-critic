@@ -40,7 +40,7 @@ def geometry_report(mesh):
     try:convex_volume=float(mesh.convex_hull.volume)
     except Exception:convex_volume=None
     return {'watertight':bool(mesh.is_watertight),'winding_consistent':bool(mesh.is_winding_consistent),
-            'components':int(mesh.body_count),'surface_area':float(mesh.area),'volume':volume,
+            'euler_number':int(mesh.euler_number),'components':int(mesh.body_count),'surface_area':float(mesh.area),'volume':volume,
             'volume_to_convex_hull':volume/convex_volume if volume is not None and convex_volume and convex_volume>1e-12 else None,
             'flat_cap_fraction':flat_cap,'principal_spreads':spreads.tolist(),'thickness_ratio':ratio,'severity':severity,
             'axis_extents':np.asarray(mesh.extents).tolist(),'warning_ru':message,

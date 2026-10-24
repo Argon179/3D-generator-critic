@@ -238,4 +238,28 @@ async def upload(files:list[UploadFile]=File(...)):
     return {'dataset_id':folder.relative_to(ROOT).as_posix()}
 
 
+
+
+
+@app.get('/api/runs/{ident}/translations')
+def get_run_translations(ident:str):
+    from gai.localization import text_pairs
+    try:
+        state=read_run(ident);path=run_dir(ident)/'translations/status.json'
+        return json.loads(path.read_text()) if path.is_file() else {'status':'missing','pairs':text_pairs(state)}
+    except (OSError,ValueError):raise HTTPException(404,'Run not found')
+
+
+@app.post('/api/runs/{ident}/translations')
+def translate_run_text(ident:str):
+    from gai.localization import translate_saved_run
+    try:
+        state=read_run(ident);out=run_dir(ident)/'translations';path=out/'status.json'
+        if path.is_file() and json.loads(path.read_text())['status'] in {'queued','running','completed'}:return json.loads(path.read_text())
+        if state['status'] in {'running','queued'}:raise HTTPException(409,'Translation is available when the experiment finishes')
+        result={'status':'queued','pairs':{}};save_json(path,result)
+        executor.submit(translate_saved_run,ident)
+        return result
+    except (OSError,ValueError):raise HTTPException(404,'Run not found')
+
 app.mount('/',StaticFiles(directory=ROOT/'web',html=True),name='web')

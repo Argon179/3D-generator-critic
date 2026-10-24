@@ -35,10 +35,10 @@ def decision_data(label,probabilities,proposal_id,permitted,reason_ru=None):
     confidence=float(probabilities[label])
     if not 0<=confidence<=1:raise ValueError('Invalid action probability')
     if not reason_ru:
-        reason_ru={'fit_silhouette':'VLM выбрала локальную подгонку контура по выбранным ракурсам.',
-                   'local_smooth':'VLM выбрала локальное сглаживание поверхности выбранного участка.',
-                   'regenerate':'VLM выбрала повторную реконструкцию по исходным фотографиям, поскольку локальная правка недостаточна.',
-                   'none':'VLM не выбрала полезную локальную операцию для этой области.',
-                   'camera_mismatch':'VLM указала на несогласованный ракурс; геометрия не меняется.'}[action]
+        reason_ru={'fit_silhouette':'VLM chose local contour fitting using the selected views.',
+                   'local_smooth':'VLM chose local surface smoothing of the selected region.',
+                   'regenerate':'VLM chose reconstruction from the original photos because local editing is insufficient.',
+                   'none':'VLM found no useful local operation for this region.',
+                   'camera_mismatch':'VLM indicated a camera mismatch; geometry remains unchanged.'}[action]
     return {'action':'none' if camera else action,'proposal_id':proposal_id if action not in {'none','camera_mismatch'} else None,
             'confidence':confidence,'camera_mismatch':camera,'reason_ru':reason_ru}

@@ -141,7 +141,7 @@ def verify_edit(run_id,before,after,refs,report,proposal,cfg):
     from gai.review import summarize_review
     data=json.loads((review/'verification.json').read_text())
     result=summarize_review(data['views'],evidence)
-    result.update({k:data[k] for k in ['model','revision','peak_vram_mb','protocol'] if k in data})
+    result.update({k:data[k] for k in ['model','revision','peak_vram_mb','protocol','translation_status','text_language'] if k in data})
     if {v['reference_index'] for v in result['views']} != {p['reference_index'] for p in pairs}:
         raise ValueError('Независимая проверка не охватила все фото')
     save_json(review/'verification.json',result)
@@ -358,13 +358,25 @@ def execute(run_id, resume_critique=False):
                     update_run(run_id,stage='verify')
                     event(run_id,'Независимая VLM: сравнение референсов с моделью до и после правки')
                     verification=verify_edit(run_id,previous_folder,current,refs,report,previous_critique,cfg)
-                    accepted=accepted and verification['accepted']
+                    visual_ok=verification['accepted']
+                    if accepted and not visual_ok and previous_critique.edit_plan.operation=='regenerate' and verification.get('protocol')=='blind_ab_two_orders_v3':
+                        from gai.review import reconstruction_evidence
+                        if reconstruction_evidence(control_before,report,verification,cfg['acceptance_margin']):
+                            visual_ok=True
+                            verification['acceptance_basis']='independent_contours_and_mesh_with_uncertain_vlm'
+                            verification['unconfirmed_visual_issues']=[v['reference_index'] for v in verification['views'] if v['worsened']]
+                            verification['reason_en']='Independent control contours and mesh checks improved; VLM comparison is uncertain, with no new defect corroborated across multiple views.'
+                            verification['reason_ru']='Контрольные контуры и структура сетки прошли проверку; сравнение VLM неуверенное, новый дефект не подтверждён в нескольких ракурсах.'
+                    accepted=accepted and visual_ok
                     reason+='; '+verification['reason_ru']
                 if critique.camera_mismatch:accepted=False;reason+='; критик обнаружил несогласование камеры'
             save_json(current/'metrics.json',report)
             item={'backend':backend,'number':number,'path':str(current.relative_to(ROOT)),'mesh':str(mesh.relative_to(ROOT)),'metrics':report,'critique':critique.model_dump(),'accepted':accepted,'decision':reason}
             if number:item['edit_source_mesh']=str(best_mesh.relative_to(ROOT))
-            if verification is not None:item['verification']=verification
+            if verification is not None:
+                verification['candidate_accepted']=accepted
+                save_json(current/'verification/verification.json',verification)
+                item['verification']=verification
             for edit_report in (current/'local_edit/edit_report.json',current/'edit_report.json'):
                 if edit_report.exists():item['edit_report']=json.loads(edit_report.read_text())
             iterations.append(item);update_run(run_id,iterations=iterations)

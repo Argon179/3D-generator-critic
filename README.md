@@ -379,3 +379,43 @@ Unsloth, без библиотеки Unsloth и без исполнения ко
 85.3% → 92.6%. Это один проверочный пример, не оценка точности на всех объектах.
 Предыдущий протокол отдельных изображений часто не различал изменения
 и зависел от порядка A/B. Его отчёты сохранены в истории переоценки.
+
+### RU / EN and the language of assessments
+
+The globe button in the top bar switches the complete interface between Russian
+and English and remembers the choice in `localStorage`. Photo selection, view
+assignments and experiment parameters are preserved. UI translations are bundled
+in `web/translations.json`; they do not require inference.
+
+New VLM reasoning is generated in English. The canonical `*_en` fields retain
+that source, while `*_ru` fields contain a separate Russian translation. Legacy
+`*_ru` JSON keys remain accepted by the internal inference protocol, but its
+prompts explicitly request English values; the final reports contain both
+languages. Translation never changes operations, confidence, regions or decisions.
+If a translation fails, the English assessment is preserved and marked incomplete.
+Old Russian reports can be translated on demand through
+`POST /api/runs/{id}/translations`; the English UI identifies them as legacy
+translations rather than English originals. Translation uses local models and
+runs under the same GPU lock.
+
+### Small improvements and an uncertain visual verifier
+
+The verifier now compares each view in **both A/B column orders**. A contradiction
+is recorded as `inconclusive`, rather than a confident improvement or regression.
+Invalid JSON is an incomplete assessment, not a camera mismatch. English
+explanations are short; small visible improvements count, and repetition is
+penalized. Both raw responses, panels, English text and Russian translations are
+saved for inspection.
+
+Local deformation still requires positive visual verification. A whole-object
+reconstruction may also be accepted with an **explicit uncertain-VLM status** if
+all these independent checks pass: genuine holdout IoU improves by the configured
+margin, holdout boundary F1 improves by at least 0.02 with no individual holdout
+F1 loss above 0.005, contour distance does not worsen, no view loses more than
+0.015 IoU, and the mesh remains one watertight, consistently oriented component
+with positive volume and unchanged Euler characteristic. Incomplete reviews or
+camera mismatch block this route. New-defect reports corroborated in two distinct
+views block it as well; one isolated concern is retained as a visible warning.
+This route is never used for local contour fitting and does not claim visual
+confirmation when the VLM is uncertain. These checks remain approximations of
+shape quality, not a guarantee of correct hidden geometry.
