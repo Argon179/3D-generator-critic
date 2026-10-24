@@ -8,59 +8,15 @@ import sys
 import traceback
 import re
 from pathlib import Path
-from typing import Literal
 
 import numpy as np
 import trimesh
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from gai.core import ROOT, RUNS, Cancelled, command, config, event, local_path, read_run, run_dir, save_json, update_run
 from gai.metrics import align, acceptance, validation_summary
 from gai.geometry import geometry_report, enforce_geometry_warning
-from gai.critic_schema import EditPlan, compatible_plan
+from gai.critic_schema import Critique, EditPlan
 from gai.local_editor import apply_plan, UnsupportedEdit
-
-
-class Critique(BaseModel):
-    model_config=ConfigDict(extra='ignore')
-    summary_ru: str=Field(max_length=2000)
-    camera_mismatch: bool
-    confidence: float=Field(ge=0,le=1)
-    edit_type: Literal["none","add","remove","reshape","repair"]|None=None
-    edit_plan: EditPlan|None=None
-    view_assessments: list[dict]=Field(default_factory=list,max_length=24)
-    should_edit: bool
-    issues: list[dict]=Field(default_factory=list,max_length=10)
-    quality_warnings: list[str]=Field(default_factory=list,max_length=3)
-    base_description: str=Field(min_length=3,max_length=250)
-    target_description: str=Field(min_length=3,max_length=250)
-
-    @field_validator('base_description','target_description')
-    @classmethod
-    def short_clip_prompt(cls,v):
-        # CLIP has a 77-token context; conservative character bound is also checked with CLIP by worker.
-        if '\n' in v:raise ValueError('Описание должно быть одной строкой')
-        return v.strip()
-
-    @model_validator(mode='after')
-    def consistent_edit(self):
-        if self.camera_mismatch or not self.issues or self.edit_type=='none':
-            self.should_edit=False
-        if not self.should_edit:
-            self.edit_type='none'
-            self.target_description=self.base_description
-        if self.edit_plan is not None and (not self.should_edit or not compatible_plan(self.edit_type,self.edit_plan.operation)):
-            self.edit_plan=EditPlan(reason_ru='Нет согласованного исполнимого плана')
-        if self.edit_plan and self.edit_plan.regions and self.view_assessments:
-            observations={v.get('reference_index'):v for v in self.view_assessments}
-            for region in self.edit_plan.regions:
-                observation=observations.get(region.reference_index,{})
-                boxes=[d.get('render_bbox') for d in observation.get('defects',[]) if isinstance(d,dict)]
-                supported=any(isinstance(b,list) and len(b)==4 and all(isinstance(x,(int,float)) and abs(x-y)<=.03 for x,y in zip(b,region.bbox)) for b in boxes)
-                if observation.get('camera_mismatch') is not False or not supported:
-                    self.edit_plan=EditPlan(reason_ru='Область не подтверждена наблюдением по этому фото')
-                    break
-        return self
 
 
 def canonical_mesh(source, destination, max_faces):
@@ -181,7 +137,7 @@ def edit(run_id,mesh,folder,critique,cfg):
     return candidate
 
 
-def execute(run_id):
+def execute(run_id, resume_critique=False):
     folder=run_dir(run_id)
     cfg=read_run(run_id).get('config') or config()
     lock=(RUNS/'.gpu.lock').open('w')
@@ -191,90 +147,103 @@ def execute(run_id):
         update_run(run_id,status='failed',error='GPU занята другим процессом проекта');lock.close();return
     try:
         state=read_run(run_id);params=state['parameters'];refs=state['references']
-        update_run(run_id,status='running',stage='generate')
-        initial=folder/'iteration_00';initial.mkdir(exist_ok=True)
-        generator=params.get('generator','auto')
-        if generator in {'hunyuan','da3'}:
-            from gai.multiview import select_views
-            selected=select_views(refs,generator,params.get('view_sides'))
-            backend={'hunyuan':'Hunyuan3D-2mv','da3':'DA3 Base + Poisson'}[generator]
-            event(run_id,backend+': генерация по реальным ракурсам; отдельные фото оставлены для проверки')
-            job=folder/'generation_job.json'
-            payload={'backend':generator,'repo':str(local_path(cfg[generator+'_repo'])),
-                'model':cfg[generator+'_model'],'revision':cfg.get(generator+'_revision'),'out':str(initial),'references':refs,
-                'background':params['background'],'seed':params['seed'],'selected':selected,
-                'resolution':cfg[generator+'_resolution']}
-            if generator=='hunyuan':payload.update(subfolder=cfg['hunyuan_subfolder'],steps=cfg['hunyuan_steps'])
-            save_json(job,payload)
-            command(run_id,[local_path(cfg[generator+'_python']),ROOT/'gai/workers/multiview_worker.py',job],timeout=7200)
+        if resume_critique:
+            if state['status'] not in {'failed','completed'} or (state['status']=='failed' and state.get('stage')!='critique') or state.get('iteration')!=0 or len(state.get('iterations',[]))>1:
+                raise ValueError('Повтор оценки поддерживается только для сохранённой исходной модели')
+            initial=folder/'iteration_00'
+            mesh=ROOT/state['preview_mesh']
             refs=json.loads((initial/'references.json').read_text())
-            meta=canonical_mesh(initial/'generated.glb',initial/'mesh.obj',cfg['max_faces'])
-            mesh=initial/'mesh.obj'
-            save_json(initial/'mesh_info.json',dict(meta,backend=backend))
-            if not meta['geometry']['watertight'] or not meta['can_deform']:
-                event(run_id,'Проверка структуры: сетка незамкнута или содержит несколько частей. Результат требует проверки; артефакты сохранены.')
+            meta=json.loads((initial/'mesh_info.json').read_text())
+            backend=meta.get('backend','Stable Fast 3D')
+            if not mesh.is_file() or not (initial/'renders/views.json').is_file():
+                raise ValueError('Нет сохранённой сетки или рендеров для повторной оценки')
+            update_run(run_id,status='running',stage='critique',error=None)
+            event(run_id,'Повторная оценка сохранённой модели: генерация и рендеры не повторяются')
         else:
-            use_multiview=params.get('generator','auto')!='sf3d' and len(refs)>=5 and all(r.get('azimuth_deg') is not None for r in refs)
-            event(run_id,'SF3D: подготовка масок и генерация по первому выбранному изображению')
-            job=folder/'generation_job.json'
-            save_json(job,{'repo':str(local_path(cfg['sf3d_repo'])),'model':cfg['sf3d_model'],'revision':cfg.get('sf3d_revision'),'seed':params['seed'],'out':str(initial),'references':refs,'background':params['background'],'retry':not use_multiview})
-            command(run_id,[local_path(cfg['sf3d_python']),ROOT/'gai/workers/sf3d_worker.py',job])
-            refs=json.loads((initial/'references.json').read_text())
-            quality_file=initial/'generation_quality.json'
-            if quality_file.exists():
-                quality=json.loads(quality_file.read_text())
-                if len(quality['candidates'])>1:
-                    event(run_id,f"SF3D: проверено {len(quality['candidates'])} отдельных ракурсов; выбран №{quality['selected_reference_index']} по эвристике толщины. Это не оценка точности 3D.")
-            meta=canonical_mesh(initial/'generated.glb',initial/'mesh.obj',cfg['max_faces']);save_json(initial/'mesh_info.json',meta)
-            mesh=initial/'mesh.obj'
-            save_json(initial/'sf3d_mesh_info.json',meta)
-            backend='Stable Fast 3D'
-            if use_multiview:
-                from gai.reconstruction import visual_hull
-                event(run_id,'Многовидовая реконструкция: известные азимуты, часть фото оставлена для проверки')
-                reconstruction=initial/'reconstruction';reconstruction.mkdir(exist_ok=True)
-                original_generation_flags=[ref.get('used_for_generation',i==0) for i,ref in enumerate(refs)]
-                # Do not reuse the reserved photos in SF3D retries or hull construction.
-                heldout=max(1,len(refs)//4)
-                heldout_indexes=set(np.linspace(1,len(refs)-1,heldout,dtype=int).tolist())
-                training=[ref for i,ref in enumerate(refs) if i not in heldout_indexes]
-                for i,ref in enumerate(refs):ref['used_for_generation']=i not in heldout_indexes
-                try:
-                    reconstructed=visual_hull(training)
-                    reconstructed.export(reconstruction/'visual_hull.glb')
-                    shutil.copy2(mesh,initial/'sf3d.obj')
-                    meta=canonical_mesh(reconstruction/'visual_hull.glb',reconstruction/'mesh.obj',cfg['max_faces'])
-                    mesh=reconstruction/'mesh.obj';backend='Многовидовая реконструкция по силуэтам'
-                    save_json(reconstruction/'reconstruction.json',{'method':'orthographic visual hull','training_references':[r['prepared'] for r in training],
-                        'heldout_references':[r['prepared'] for i,r in enumerate(refs) if i in heldout_indexes],'elevation_deg':0,'camera_estimated':True,
-                        'mesh_info':meta,'limitations':'Известны относительные азимуты; масштаб по высоте и камера приблизительные. Впадины и скрытые детали не восстанавливаются.'})
-                    save_json(initial/'references.json',refs)
-                    event(run_id,'Восстановлен объём по нескольким реальным силуэтам; исходная SF3D-сетка сохранена отдельно')
-                    source_preview=initial/'sf3d_evaluation';source_preview.mkdir(exist_ok=True)
-                    render(run_id,initial/'sf3d.obj',source_preview,dict(cfg,render_elevations=[0],render_step_deg=90))
-                    source_report=align(refs,source_preview/'renders')
-                    for pair in source_report['pairs']:
-                        pair['reference_path']=str(Path(refs[pair['reference_index']]['prepared']).relative_to(ROOT))
-                        pair['used_for_generation']=pair['reference_index']==0
-                    source_report.update(validation_summary(source_report))
-                    source_report['geometry']=geometry_report(trimesh.load(initial/'sf3d.obj',force='mesh'))
-                    save_json(source_preview/'comparison.json',{'path':str(source_preview.relative_to(ROOT)),
-                        'mesh':str((initial/'sf3d.obj').relative_to(ROOT)),'metrics':source_report,
-                        'note':'Четыре диагностических вида; для сопоставления используется ближайший силуэт, камера приблизительная.'})
-                except ValueError as exc:
-                    if params.get('generator')=='multiview':raise
-                    mesh=initial/'mesh.obj';meta=json.loads((initial/'sf3d_mesh_info.json').read_text());backend='Stable Fast 3D'
-                    for i,ref in enumerate(refs):ref['used_for_generation']=original_generation_flags[i]
-                    save_json(initial/'references.json',refs)
-                    event(run_id,'Многовидовая реконструкция недоступна: '+str(exc)+'. Сохранён результат SF3D.')
-            save_json(initial/'mesh_info.json',dict(meta,backend=backend))
+            update_run(run_id,status='running',stage='generate')
+            initial=folder/'iteration_00';initial.mkdir(exist_ok=True)
+            generator=params.get('generator','auto')
+            if generator in {'hunyuan','da3'}:
+                from gai.multiview import select_views
+                selected=select_views(refs,generator,params.get('view_sides'))
+                backend={'hunyuan':'Hunyuan3D-2mv','da3':'DA3 Base + Poisson'}[generator]
+                event(run_id,backend+': генерация по реальным ракурсам; отдельные фото оставлены для проверки')
+                job=folder/'generation_job.json'
+                payload={'backend':generator,'repo':str(local_path(cfg[generator+'_repo'])),
+                    'model':cfg[generator+'_model'],'revision':cfg.get(generator+'_revision'),'out':str(initial),'references':refs,
+                    'background':params['background'],'seed':params['seed'],'selected':selected,
+                    'resolution':cfg[generator+'_resolution']}
+                if generator=='hunyuan':payload.update(subfolder=cfg['hunyuan_subfolder'],steps=cfg['hunyuan_steps'])
+                save_json(job,payload)
+                command(run_id,[local_path(cfg[generator+'_python']),ROOT/'gai/workers/multiview_worker.py',job],timeout=7200)
+                refs=json.loads((initial/'references.json').read_text())
+                meta=canonical_mesh(initial/'generated.glb',initial/'mesh.obj',cfg['max_faces'])
+                mesh=initial/'mesh.obj'
+                save_json(initial/'mesh_info.json',dict(meta,backend=backend))
+                if not meta['geometry']['watertight'] or not meta['can_deform']:
+                    event(run_id,'Проверка структуры: сетка незамкнута или содержит несколько частей. Результат требует проверки; артефакты сохранены.')
+            else:
+                use_multiview=params.get('generator','auto')!='sf3d' and len(refs)>=5 and all(r.get('azimuth_deg') is not None for r in refs)
+                event(run_id,'SF3D: подготовка масок и генерация по первому выбранному изображению')
+                job=folder/'generation_job.json'
+                save_json(job,{'repo':str(local_path(cfg['sf3d_repo'])),'model':cfg['sf3d_model'],'revision':cfg.get('sf3d_revision'),'seed':params['seed'],'out':str(initial),'references':refs,'background':params['background'],'retry':not use_multiview})
+                command(run_id,[local_path(cfg['sf3d_python']),ROOT/'gai/workers/sf3d_worker.py',job])
+                refs=json.loads((initial/'references.json').read_text())
+                quality_file=initial/'generation_quality.json'
+                if quality_file.exists():
+                    quality=json.loads(quality_file.read_text())
+                    if len(quality['candidates'])>1:
+                        event(run_id,f"SF3D: проверено {len(quality['candidates'])} отдельных ракурсов; выбран №{quality['selected_reference_index']} по эвристике толщины. Это не оценка точности 3D.")
+                meta=canonical_mesh(initial/'generated.glb',initial/'mesh.obj',cfg['max_faces']);save_json(initial/'mesh_info.json',meta)
+                mesh=initial/'mesh.obj'
+                save_json(initial/'sf3d_mesh_info.json',meta)
+                backend='Stable Fast 3D'
+                if use_multiview:
+                    from gai.reconstruction import visual_hull
+                    event(run_id,'Многовидовая реконструкция: известные азимуты, часть фото оставлена для проверки')
+                    reconstruction=initial/'reconstruction';reconstruction.mkdir(exist_ok=True)
+                    original_generation_flags=[ref.get('used_for_generation',i==0) for i,ref in enumerate(refs)]
+                    # Do not reuse the reserved photos in SF3D retries or hull construction.
+                    heldout=max(1,len(refs)//4)
+                    heldout_indexes=set(np.linspace(1,len(refs)-1,heldout,dtype=int).tolist())
+                    training=[ref for i,ref in enumerate(refs) if i not in heldout_indexes]
+                    for i,ref in enumerate(refs):ref['used_for_generation']=i not in heldout_indexes
+                    try:
+                        reconstructed=visual_hull(training)
+                        reconstructed.export(reconstruction/'visual_hull.glb')
+                        shutil.copy2(mesh,initial/'sf3d.obj')
+                        meta=canonical_mesh(reconstruction/'visual_hull.glb',reconstruction/'mesh.obj',cfg['max_faces'])
+                        mesh=reconstruction/'mesh.obj';backend='Многовидовая реконструкция по силуэтам'
+                        save_json(reconstruction/'reconstruction.json',{'method':'orthographic visual hull','training_references':[r['prepared'] for r in training],
+                            'heldout_references':[r['prepared'] for i,r in enumerate(refs) if i in heldout_indexes],'elevation_deg':0,'camera_estimated':True,
+                            'mesh_info':meta,'limitations':'Известны относительные азимуты; масштаб по высоте и камера приблизительные. Впадины и скрытые детали не восстанавливаются.'})
+                        save_json(initial/'references.json',refs)
+                        event(run_id,'Восстановлен объём по нескольким реальным силуэтам; исходная SF3D-сетка сохранена отдельно')
+                        source_preview=initial/'sf3d_evaluation';source_preview.mkdir(exist_ok=True)
+                        render(run_id,initial/'sf3d.obj',source_preview,dict(cfg,render_elevations=[0],render_step_deg=90))
+                        source_report=align(refs,source_preview/'renders')
+                        for pair in source_report['pairs']:
+                            pair['reference_path']=str(Path(refs[pair['reference_index']]['prepared']).relative_to(ROOT))
+                            pair['used_for_generation']=pair['reference_index']==0
+                        source_report.update(validation_summary(source_report))
+                        source_report['geometry']=geometry_report(trimesh.load(initial/'sf3d.obj',force='mesh'))
+                        save_json(source_preview/'comparison.json',{'path':str(source_preview.relative_to(ROOT)),
+                            'mesh':str((initial/'sf3d.obj').relative_to(ROOT)),'metrics':source_report,
+                            'note':'Четыре диагностических вида; для сопоставления используется ближайший силуэт, камера приблизительная.'})
+                    except ValueError as exc:
+                        if params.get('generator')=='multiview':raise
+                        mesh=initial/'mesh.obj';meta=json.loads((initial/'sf3d_mesh_info.json').read_text());backend='Stable Fast 3D'
+                        for i,ref in enumerate(refs):ref['used_for_generation']=original_generation_flags[i]
+                        save_json(initial/'references.json',refs)
+                        event(run_id,'Многовидовая реконструкция недоступна: '+str(exc)+'. Сохранён результат SF3D.')
+                save_json(initial/'mesh_info.json',dict(meta,backend=backend))
         baseline_pairs=None;iterations=[];current_description=params['prompt']
         update_run(run_id,preview_mesh=str(mesh.relative_to(ROOT)),source_glb=str((initial/'generated.glb').relative_to(ROOT)))
         for number in range(params['iterations']+1):
             current=folder/f'iteration_{number:02d}';current.mkdir(exist_ok=True)
             update_run(run_id,stage='render',iteration=number)
-            event(run_id,f'Итерация {number}: EEVEE, фиксированная камера и clay-материал')
-            render(run_id,mesh,current,cfg)
+            event(run_id,f'Итерация {number}: используются сохранённые рендеры' if resume_critique and number==0 else f'Итерация {number}: EEVEE, фиксированная камера и clay-материал')
+            if not (resume_critique and number==0):render(run_id,mesh,current,cfg)
             report=align(refs,current/'renders',baseline_pairs)
             for pair in report['pairs']:
                 pair['reference_azimuth_deg']=refs[pair['reference_index']].get('azimuth_deg')

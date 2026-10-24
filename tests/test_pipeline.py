@@ -151,3 +151,25 @@ def test_local_candidate_needs_vlm_confirmation_even_if_iou_improves(tmp_path,mo
     assert checked and [i['accepted'] for i in state['iterations']]==[True,False]
     assert state['iterations'][1]['verification']['accepted'] is False
     assert np.isclose(trimesh.load(folder/'best.glb').extents.max(),2)
+
+
+def test_failed_initial_critique_resumes_without_generation_or_render(tmp_path,monkeypatch):
+    root=tmp_path/'project';runs=root/'runs';runs.mkdir(parents=True)
+    monkeypatch.setattr(core,'ROOT',root);monkeypatch.setattr(core,'RUNS',runs)
+    monkeypatch.setattr(pipeline,'ROOT',root);monkeypatch.setattr(pipeline,'RUNS',runs)
+    cfg=core.config();ident='bbbbaa112233';folder=runs/ident;initial=folder/'iteration_00';initial.mkdir(parents=True)
+    mesh=initial/'mesh.obj';trimesh.creation.icosphere(subdivisions=1).export(mesh)
+    core.save_json(initial/'references.json',[{'prepared':'one.png'},{'prepared':'two.png'}])
+    core.save_json(initial/'mesh_info.json',{'backend':'Hunyuan3D-2mv','can_deform':True})
+    core.save_json(initial/'renders/views.json',[])
+    core.save_json(folder/'state.json',{'id':ident,'status':'failed','stage':'critique','iteration':0,'config':cfg,
+        'parameters':{'seed':42,'background':'alpha','prompt':'a sphere','iterations':0},
+        'references':[],'preview_mesh':str(mesh.relative_to(root)),'iterations':[],'events':[],'error':'invalid JSON'})
+    def forbidden(*args,**kwargs):raise AssertionError('Generation/render must not repeat')
+    monkeypatch.setattr(pipeline,'command',forbidden);monkeypatch.setattr(pipeline,'render',forbidden)
+    monkeypatch.setattr(pipeline,'align',lambda *args:{'silhouette_iou':.8,'pairs':[{'reference_index':i,'iou':.8,'render':'x.png'} for i in range(2)]})
+    monkeypatch.setattr(pipeline,'criticize',lambda *args:pipeline.Critique(summary_ru='Test',camera_mismatch=False,confidence=.8,should_edit=False,base_description='a sphere',target_description='a sphere'))
+    pipeline.execute(ident,resume_critique=True)
+    state=core.read_run(ident)
+    assert state['status']=='completed' and state['error'] is None,state.get('error')
+    assert len(state['iterations'])==1 and (folder/'best.glb').exists()
