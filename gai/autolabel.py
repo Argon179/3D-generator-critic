@@ -37,7 +37,7 @@ def infer_labels(ident,refs):
     with (RUNS/'.gpu.lock').open('w') as lock:
         try:fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
         except BlockingIOError:raise RuntimeError('GPU занята генерацией. Повторите авторазметку после её завершения.')
-        job={'model':cfg['qwen_model'],'revision':cfg.get('qwen_revision'),'references':refs,'out':str(folder)}
+        job={'model':cfg['qwen_model'],'revision':cfg.get('qwen_revision'),'references':refs,'out':str(folder),'max_pixels':cfg.get('qwen_label_max_pixels',256*256)}
         save_json(folder/'job.json',job)
         with (folder/'process.log').open('w') as log:
             r=subprocess.run([str(local_path(cfg['qwen_python'])),str(ROOT/'gai/workers/label_worker.py'),str(folder/'job.json')],env=child_env(),stdout=log,stderr=subprocess.STDOUT,timeout=600)

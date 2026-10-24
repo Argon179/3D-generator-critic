@@ -78,3 +78,18 @@ def test_manual_sides_accept_three_photos_without_known_angles(tmp_path,monkeypa
     assert state['parameters']['view_sides']=={'front':0,'left':1}
     assert all(r['azimuth_deg'] is None for r in state['references'])
     assert len(submitted)==1 and state['status']=='queued'
+
+
+def test_refine_endpoint_queues_existing_mesh_without_generation(monkeypatch):
+    import gai.server as server
+    import gai.refinement as refinement
+    from types import SimpleNamespace
+    monkeypatch.setattr(server,'weight_checks',lambda:[])
+    monkeypatch.setattr(refinement,'create_refinement',lambda ident,iterations:{'id':'deedee112233','parent_run':ident,'status':'queued','iterations_requested':iterations})
+    submitted=[]
+    monkeypatch.setattr(server,'executor',SimpleNamespace(submit=lambda *args,**kwargs:submitted.append((args,kwargs))))
+    result=TestClient(app).post('/api/runs/36312ae42e91/refine',json={'iterations':2})
+    assert result.status_code==200,result.text
+    assert result.json()['parent_run']=='36312ae42e91'
+    assert submitted[0][1]['resume_critique'] is True
+    assert TestClient(app).post('/api/runs/36312ae42e91/refine',json={'iterations':0}).status_code==422

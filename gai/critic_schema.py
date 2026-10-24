@@ -17,7 +17,9 @@ class Region(BaseModel):
 
 
 class EditPlan(BaseModel):
-    operation: Literal['none','local_scale','local_smooth','remove_region','repair_mesh','regenerate'] = 'none'
+    operation: Literal['none','local_scale','local_smooth','remove_region','repair_mesh','regenerate','fit_silhouette'] = 'none'
+    proposal_id: str|None = Field(default=None,max_length=80)
+    evidence_basis: Literal['vlm_boxes','silhouette_catalog']='vlm_boxes'
     reason_ru: str = Field(default='',max_length=1500)
     regions: list[Region] = Field(default_factory=list,max_length=12)
     scale: float = Field(default=1,ge=.92,le=1.08)
@@ -25,6 +27,10 @@ class EditPlan(BaseModel):
 
     @model_validator(mode='after')
     def independent_regions(self):
+        if self.operation=='fit_silhouette' and (self.evidence_basis!='silhouette_catalog' or not self.proposal_id):
+            raise ValueError('Contour fitting requires a compiled proposal ID')
+        if self.evidence_basis=='silhouette_catalog' and self.operation not in {'fit_silhouette','local_smooth','regenerate','none'}:
+            raise ValueError('Catalog evidence cannot authorize free-form mesh operations')
         ids=[r.reference_index for r in self.regions]
         if len(ids)!=len(set(ids)):
             raise ValueError('Only one region per reference')
@@ -34,7 +40,7 @@ class EditPlan(BaseModel):
 def compatible_plan(edit_type,operation):
     if operation=='none':return True
     return operation in {
-        'none':{'none'}, 'reshape':{'local_scale','local_smooth'},
+        'none':{'none'}, 'reshape':{'local_scale','local_smooth','fit_silhouette','regenerate'},
         'remove':{'remove_region'}, 'repair':{'repair_mesh'},
         'add':{'regenerate'},
     }.get(edit_type,set())
@@ -70,7 +76,7 @@ class Critique(BaseModel):
             self.target_description=self.base_description
         if self.edit_plan is not None and self.edit_plan.operation!='none' and (not self.should_edit or not compatible_plan(self.edit_type,self.edit_plan.operation)):
             self.edit_plan=EditPlan(reason_ru='Нет согласованного исполнимого плана')
-        if self.edit_plan and self.edit_plan.regions and self.view_assessments:
+        if self.edit_plan and self.edit_plan.regions and self.view_assessments and self.edit_plan.evidence_basis!='silhouette_catalog':
             observations={v.get('reference_index'):v for v in self.view_assessments}
             for region in self.edit_plan.regions:
                 observation=observations.get(region.reference_index,{})
@@ -85,7 +91,7 @@ class Critique(BaseModel):
 
 class ViewDefect(BaseModel):
     part: str
-    kind: Literal['extra','missing','shape','topology']
+    kind: Literal['extra','missing','shape','topology','appearance']
     observation_ru: str = Field(max_length=1500)
     render_bbox: tuple[float,float,float,float]
     confidence: float = Field(ge=0,le=1)
@@ -114,3 +120,29 @@ def validate_critic_report(data,base_description,observations):
         data['edit_plan']=EditPlan(reason_ru='Оценка получена, но VLM не сформировала допустимый план правки').model_dump()
         data['quality_warnings']=['Оценка получена; автоматическая правка недоступна из-за формата плана.']
     return Critique.model_validate(data).model_dump()
+
+
+class ProposalChoice(BaseModel):
+    action: Literal['fit_silhouette','local_smooth','regenerate','none']
+    proposal_id: str|None=None
+    camera_mismatch: bool
+    confidence: float=Field(ge=0,le=1)
+    reason_ru: str=Field(min_length=3,max_length=1500)
+
+
+def compile_choice(data,catalog,base_description,observations):
+    choice=ProposalChoice.model_validate(data)
+    proposals={p['id']:p for p in catalog['proposals']}
+    if choice.action!='none' and choice.proposal_id not in proposals:
+        raise ValueError('Select an existing proposal_id, never invent coordinates')
+    active=choice.action in {'fit_silhouette','local_smooth','regenerate'} and not choice.camera_mismatch and choice.confidence>=.65
+    if active:
+        p=proposals[choice.proposal_id]
+        if choice.action not in p.get('permitted_operations',['fit_silhouette','local_smooth','regenerate']):raise ValueError('This operation was excluded after an unsuccessful trial')
+        plan=EditPlan(operation=choice.action,proposal_id=p['id'],evidence_basis='silhouette_catalog',
+                      regions=p['regions'],reason_ru=choice.reason_ru)
+    else:plan=EditPlan(reason_ru=choice.reason_ru)
+    return Critique(summary_ru=choice.reason_ru,camera_mismatch=choice.camera_mismatch,confidence=choice.confidence,
+        should_edit=active,edit_type='reshape' if active else 'none',edit_plan=plan,
+        issues=[{'part':'selected contour region','observation_ru':choice.reason_ru,'suggestion_ru':('Повторить реконструкцию по исходным фото и проверить все ракурсы.' if choice.action=='regenerate' else 'Применить выбранную локальную операцию; затем проверить остальные виды.')}] if active else [],
+        base_description=base_description,target_description=base_description,view_assessments=observations).model_dump(mode='json')

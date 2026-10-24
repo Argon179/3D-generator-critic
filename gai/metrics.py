@@ -112,7 +112,7 @@ def acceptance(before, after, margin=0.005, require_improvement=True):
     def scores(report):
         return {p['reference_index']:p['iou'] for p in report['pairs']}
     a, b = scores(before), scores(after)
-    holdout = [p['reference_index'] for p in before['pairs'] if not p.get('used_for_generation',p['reference_index']==0)]
+    holdout = [p['reference_index'] for p in before['pairs'] if not p.get('used_for_generation',p['reference_index']==0) and not p.get('used_for_edit',False)]
     if not holdout:
         return False, "Нет проверочных ракурсов"
     delta = float(np.mean([b[i]-a[i] for i in holdout]))
@@ -136,8 +136,9 @@ def acceptance(before, after, margin=0.005, require_improvement=True):
 
 def validation_summary(report):
     groups={}
-    for name,wanted in [('heldout',False),('used_for_generation',True)]:
-        pairs=[p for p in report['pairs'] if bool(p.get('used_for_generation',p['reference_index']==0))==wanted]
+    for name,wanted in [('heldout',False),('used_for_generation',True),('used_for_edit',True)]:
+        if name=='used_for_edit':pairs=[p for p in report['pairs'] if p.get('used_for_edit',False)]
+        else:pairs=[p for p in report['pairs'] if bool(p.get('used_for_generation',p['reference_index']==0))==wanted and (wanted or not p.get('used_for_edit',False))]
         groups[name]={'count':len(pairs)}
         for key in ['iou','boundary_f1','contour_distance']:
             groups[name][key]=float(np.mean([p[key] for p in pairs])) if pairs and all(key in p for p in pairs) else None

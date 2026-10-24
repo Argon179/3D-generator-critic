@@ -110,3 +110,9 @@ def test_labeled_top_and_bottom_match_their_actual_cameras(tmp_path):
     assert [p['elevation_deg'] for p in report['pairs']]==[0,90,-90]
     fixed=align(refs,tmp_path,report['pairs'])
     assert fixed['silhouette_iou']==1
+
+
+def test_fitting_views_are_not_counted_as_independent_validation():
+    before={'pairs':[{'reference_index':i,'iou':.7,'used_for_generation':i==0,'used_for_edit':i in [1,2]} for i in range(4)]}
+    after={'pairs':[{'reference_index':i,'iou':score} for i,score in enumerate([.7,.9,.9,.66])]}
+    assert not acceptance(before,after,require_improvement=False)[0]

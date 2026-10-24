@@ -1,6 +1,7 @@
 """Run Qwen in isolation so GPU memory is released before generation."""
 import json
 import sys
+import os
 from pathlib import Path
 from gai.workers.qwen_worker import parse_response
 
@@ -17,11 +18,12 @@ Indices must exactly match supplied photo indices. These are suggestions, not ca
 
 
 def main():
+    os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF","expandable_segments:True")
     import torch
     from PIL import Image
     from transformers import AutoProcessor,Qwen3VLForConditionalGeneration,BitsAndBytesConfig
     job=json.loads(Path(sys.argv[1]).read_text());out=Path(job['out'])
-    processor=AutoProcessor.from_pretrained(job['model'],revision=job.get('revision'),min_pixels=128*128,max_pixels=256*256)
+    processor=AutoProcessor.from_pretrained(job['model'],revision=job.get('revision'),min_pixels=128*128,max_pixels=job.get('max_pixels',256*256))
     model=Qwen3VLForConditionalGeneration.from_pretrained(job['model'],revision=job.get('revision'),device_map={'':'cuda:0'},torch_dtype=torch.float16,attn_implementation='sdpa',quantization_config=BitsAndBytesConfig(load_in_4bit=True,bnb_4bit_quant_type='nf4',bnb_4bit_use_double_quant=True,bnb_4bit_compute_dtype=torch.float16))
     content=[{'type':'text','text':PROMPT}]
     for ref in job['references']:

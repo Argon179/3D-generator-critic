@@ -173,3 +173,48 @@ def test_failed_initial_critique_resumes_without_generation_or_render(tmp_path,m
     state=core.read_run(ident)
     assert state['status']=='completed' and state['error'] is None,state.get('error')
     assert len(state['iterations'])==1 and (folder/'best.glb').exists()
+
+
+def test_rejected_catalog_edit_can_try_a_different_vlm_operation(tmp_path,monkeypatch):
+    from pathlib import Path
+    root=tmp_path/'project';runs=root/'runs';runs.mkdir(parents=True)
+    monkeypatch.setattr(core,'ROOT',root);monkeypatch.setattr(core,'RUNS',runs)
+    monkeypatch.setattr(pipeline,'ROOT',root);monkeypatch.setattr(pipeline,'RUNS',runs)
+    cfg=core.config();ident='ccccaa112233';folder=runs/ident;folder.mkdir()
+    core.save_json(folder/'state.json',{'id':ident,'status':'queued','config':cfg,
+        'parameters':{'seed':42,'background':'alpha','prompt':'an object','iterations':2},
+        'references':[{'path':str(i)+'.png'} for i in range(3)],'iterations':[],'events':[]})
+    def generate(run_id,args,**kwargs):
+        job=json.loads(Path(args[-1]).read_text());out=Path(job['out'])
+        trimesh.creation.icosphere(subdivisions=1).export(out/'generated.glb')
+        core.save_json(out/'references.json',[{'prepared':str(i)+'.png'} for i in range(3)])
+    monkeypatch.setattr(pipeline,'command',generate);monkeypatch.setattr(pipeline,'render',lambda *args:None)
+    def align(refs,render_dir,fixed=None):
+        score=.7 if render_dir.parent.name=='iteration_00' else .9
+        return {'silhouette_iou':score,'pairs':[{'reference_index':i,'iou':score,'render':'x.png'} for i in range(3)]}
+    monkeypatch.setattr(pipeline,'align',align)
+    def critique(operation):
+        return pipeline.Critique(summary_ru='Synthetic fixture',camera_mismatch=False,confidence=.8,should_edit=True,
+            edit_type='reshape',edit_plan={'operation':operation,'proposal_id':'region_01','evidence_basis':'silhouette_catalog',
+                'regions':[{'reference_index':i,'bbox':[.1,.1,.9,.9]} for i in [0,1]]},
+            issues=[{'part':'fixture'}],view_assessments=[{'reference_index':0}],base_description='an object',target_description='an object')
+    calls=[]
+    def critic(run_id,source,refs,report,prompt,cfg):
+        if '_excluded_edits' in cfg:
+            assert ('fit_silhouette','region_01') in cfg['_excluded_edits'];calls.append('alternative')
+            return critique('local_smooth')
+        return critique('fit_silhouette')
+    monkeypatch.setattr(pipeline,'criticize',critic)
+    def edit(run_id,mesh,out,c,cfg):
+        if c.edit_plan.operation=='local_smooth':
+            assert Path(cfg['_edit_source']).name=='iteration_00'
+        candidate=trimesh.load(mesh);candidate.vertices[:,1]*=1.02
+        path=out/'mesh.obj';candidate.export(path);return path
+    monkeypatch.setattr(pipeline,'edit',edit)
+    monkeypatch.setattr(pipeline,'verify_edit',lambda run_id,before,after,*args:{'accepted':after.name=='iteration_02','reason_ru':'Synthetic fixture','views':[]})
+    pipeline.execute(ident)
+    state=core.read_run(ident)
+    assert state['status']=='completed',state.get('error')
+    assert [i['accepted'] for i in state['iterations']]==[True,False,True]
+    assert state['iterations'][2]['edit_source_mesh']==state['iterations'][0]['mesh']
+    assert calls==['alternative']

@@ -5,10 +5,10 @@
   "textdeformer_python": ".venvs/textdeformer/bin/python",
   "sf3d_repo": "vendor/stable-fast-3d",
   "textdeformer_repo": "vendor/TextDeformer",
-  "qwen_model": "Qwen/Qwen3-VL-4B-Instruct",
+  "qwen_model": "unsloth/Qwen3-VL-8B-Instruct-bnb-4bit",
   "sf3d_model": "stabilityai/stable-fast-3d",
   "sf3d_revision": "f0c9a8ffd62cb1bbc8a7a53c9f87a0be1b6be778",
-  "qwen_revision": "ebb281ec70b05090aa6165b016eac8ec08e71b17",
+  "qwen_revision": "10d842936325905934ea24e64325d774693f166e",
   "render_resolution": 384,
   "render_step_deg": 30,
   "render_elevations": [
@@ -33,5 +33,7 @@
   "da3_model": "depth-anything/DA3-BASE",
   "da3_resolution": 336,
   "hunyuan_revision": "3a761b539b29fe4ff64714813aa9560fd66f5de0",
-  "da3_revision": "f4a6c9b3c95e41c82048423d3493a81ec3fa810e"
+  "da3_revision": "f4a6c9b3c95e41c82048423d3493a81ec3fa810e",
+  "qwen_max_pixels": 65536,
+  "qwen_label_max_pixels": 36864
 }

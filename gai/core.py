@@ -188,7 +188,7 @@ def doctor():
         check("GPU", False, "nvidia-smi недоступен")
     blender = local_path(cfg["blender"])
     check("Blender EEVEE", blender.is_file(), str(blender))
-    probes = {"SF3D": ("sf3d_python", "sf3d_repo", "import sys; sys.path.insert(0, sys.argv[1]); import sf3d.system, rembg, texture_baker, uv_unwrapper; import torch; assert torch.cuda.is_available(); print('CUDA и импорты OK')"), "Qwen3-VL 4B": ("qwen_python", None, "import torch, bitsandbytes; from transformers import Qwen3VLForConditionalGeneration; assert torch.cuda.is_available(); print('CUDA и импорты OK')"), "TextDeformer": ("textdeformer_python", "textdeformer_repo", "import clip, igl, cholespy, torch_sparse, torch_scatter, pymeshlab, nvdiffrast.torch; import torch; assert torch.cuda.is_available(); print('CUDA и импорты OK')")}
+    probes = {"SF3D": ("sf3d_python", "sf3d_repo", "import sys; sys.path.insert(0, sys.argv[1]); import sf3d.system, rembg, texture_baker, uv_unwrapper; import torch; assert torch.cuda.is_available(); print('CUDA и импорты OK')"), "Qwen3-VL": ("qwen_python", None, "import torch, bitsandbytes; from transformers import Qwen3VLForConditionalGeneration; assert torch.cuda.is_available(); print('CUDA и импорты OK')"), "TextDeformer": ("textdeformer_python", "textdeformer_repo", "import clip, igl, cholespy, torch_sparse, torch_scatter, pymeshlab, nvdiffrast.torch; import torch; assert torch.cuda.is_available(); print('CUDA и импорты OK')")}
     for name, (py, repo, code) in probes.items():
         executable = local_path(cfg[py])
         if not executable.exists():

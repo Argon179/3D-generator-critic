@@ -60,7 +60,7 @@ def validate_candidate(path):
 
 def render(run_id, mesh, folder, cfg):
     job=folder/'render_job.json'
-    save_json(job,{'mesh':str(mesh),'out':str(folder/'renders'),'resolution':cfg['render_resolution'],'step':cfg['render_step_deg'],'elevations':cfg['render_elevations']})
+    save_json(job,{'mesh':str(mesh),'out':str(folder/'renders'),'resolution':cfg['render_resolution'],'step':cfg['render_step_deg'],'elevations':cfg['render_elevations'],'views':cfg.get('_render_views')})
     command(run_id,[local_path(cfg['blender']),'--background','--factory-startup','--python',ROOT/'scripts/blender_render.py','--',job],timeout=1800)
 
 
@@ -75,10 +75,30 @@ def criticize(run_id, folder, refs, metrics, prompt, cfg):
     audit=[dict(v,path=str(folder/'renders'/v['file'])) for v in views if v['azimuth_deg'] in (0,90,180,270) and v['elevation_deg']==0]
     audit.extend(dict(v,path=str(folder/'renders'/v['file'])) for v in views if abs(v['elevation_deg'])==90)
     geometry=metrics.get('geometry',{})
-    job=folder/'critic_job.json'
-    save_json(job,{'model':cfg['qwen_model'],'revision':cfg.get('qwen_revision'),'pairs':selected,'audit_views':audit,'geometry':geometry,'base_description':prompt,'out':str(folder)})
+    catalog=None
+    mesh_path=folder/'mesh.obj'
+    report_file=folder/'evaluated_mesh.json'
+    if report_file.exists():mesh_path=Path(json.loads(report_file.read_text())['mesh'])
+    if mesh_path.is_file() and metrics.get('pairs') and all(p.get('reference_path') for p in metrics['pairs']):
+        from gai.shape_evidence import build_catalog
+        catalog=build_catalog(mesh_path,folder,metrics['pairs'])
+        excluded={tuple(x) for x in cfg.get('_excluded_edits',[])}
+        excluded_operations=set(cfg.get('_excluded_operations',[]))
+        generation_file=folder.parent/'generation_job.json'
+        can_regenerate=generation_file.is_file() and json.loads(generation_file.read_text()).get('backend')=='hunyuan'
+        for candidate in catalog['proposals']:
+            candidate['permitted_operations']=[op for op in ['fit_silhouette','local_smooth']+(['regenerate'] if can_regenerate else []) if (op,candidate['id']) not in excluded and op not in excluded_operations]
+        catalog['proposals']=[p for p in catalog['proposals'] if p['permitted_operations']]
+        evidence_views={v['reference_index']:v for v in catalog['views']}
+        for pair in selected:
+            v=evidence_views.get(pair['reference_index'])
+            if v:pair.update(reference=v['target'],difference=v['difference'])
+    output=Path(cfg.get('_critic_out',folder));output.mkdir(parents=True,exist_ok=True)
+    job=output/'critic_job.json'
+    save_json(job,{'model':cfg['qwen_model'],'revision':cfg.get('qwen_revision'),'pairs':selected,'audit_views':audit,'geometry':geometry,'shape_catalog':catalog,'base_description':prompt,'out':str(output),'max_pixels':cfg.get('qwen_max_pixels',384*384),
+                   'mode':'choose' if '_reuse_observations' in cfg else 'critic','observations':cfg.get('_reuse_observations',[])})
     command(run_id,[local_path(cfg['qwen_python']),ROOT/'gai/workers/qwen_worker.py',job])
-    data=json.loads((folder/'critique.json').read_text())
+    data=json.loads((output/'critique.json').read_text())
     # The CLIP source is the caller's fixed description, not a fresh description
     # of the desired reference that the VLM may accidentally repeat as both ends.
     data['base_description']=prompt
@@ -87,7 +107,7 @@ def criticize(run_id, folder, refs, metrics, prompt, cfg):
     except (ValueError,TypeError):data['edit_plan']=EditPlan(reason_ru='Некорректный план VLM; изменение не выполняется').model_dump()
     if geometry:data=enforce_geometry_warning(data,geometry)
     critique=Critique.model_validate(data)
-    save_json(folder/'critique.json',dict(critique.model_dump(),peak_vram_mb=data.get('peak_vram_mb')))
+    save_json(output/'critique.json',dict(critique.model_dump(),peak_vram_mb=data.get('peak_vram_mb')))
     return critique
 
 
@@ -96,14 +116,31 @@ def verify_edit(run_id,before,after,refs,report,proposal,cfg):
     job=review/'job.json'
     pairs=[{'reference_index':p['reference_index'],'reference':refs[p['reference_index']]['prepared'],
             'before':str(before/'renders'/p['render']),'after':str(after/'renders'/p['render'])} for p in report['pairs']]
+    if proposal.edit_plan.evidence_basis=='silhouette_catalog':
+        from PIL import Image
+        region_map={r.reference_index:r.bbox for r in proposal.edit_plan.regions}
+        for pair in pairs:
+            idx=pair['reference_index']
+            target=before/'shape_evidence'/f'target_{idx:02d}.png'
+            if target.is_file():pair['reference']=str(target)
+            box=region_map.get(idx)
+            for key in ['reference','before','after']:
+                im=Image.open(pair[key]).convert('RGBA')
+                if box:
+                    x0,y0,x1,y1=box;cx=(x0+x1)/2;cy=(y0+y1)/2;radius=max(x1-x0,y1-y0)*.65
+                    bounds=(max(0,cx-radius),max(0,cy-radius),min(1,cx+radius),min(1,cy+radius))
+                    im=im.crop(tuple(round(v*(im.width if i%2==0 else im.height)) for i,v in enumerate(bounds)))
+                im=im.resize((max(1,im.width*384//max(im.size)),max(1,im.height*384//max(im.size))))
+                destination=review/f'view_{idx:02d}_{key}.png';im.save(destination);pair[key]=str(destination)
     evidence=[r.reference_index for r in proposal.edit_plan.regions] or [p['reference_index'] for p in pairs]
     save_json(job,{'mode':'verify','model':cfg['qwen_model'],'revision':cfg.get('qwen_revision'),
-                   'out':str(review),'pairs':pairs,'proposal':proposal.model_dump(),'evidence_indexes':evidence})
+                   'out':str(review),'max_pixels':cfg.get('qwen_max_pixels',384*384),'pairs':pairs,'proposal':proposal.model_dump(),'evidence_indexes':evidence})
     command(run_id,[local_path(cfg['qwen_python']),ROOT/'gai/workers/qwen_worker.py',job])
     # Revalidate the raw per-view assessments, not just an untrusted accepted flag.
     from gai.review import summarize_review
     data=json.loads((review/'verification.json').read_text())
     result=summarize_review(data['views'],evidence)
+    result.update({k:data[k] for k in ['model','revision','peak_vram_mb'] if k in data})
     if {v['reference_index'] for v in result['views']} != {p['reference_index'] for p in pairs}:
         raise ValueError('Независимая проверка не охватила все фото')
     save_json(review/'verification.json',result)
@@ -112,11 +149,23 @@ def verify_edit(run_id,before,after,refs,report,proposal,cfg):
 
 def edit(run_id,mesh,folder,critique,cfg):
     if critique.edit_plan is not None:
-        source=folder.parent/f'iteration_{int(folder.name.split("_")[-1])-1:02d}'
-        if critique.edit_plan.operation=='regenerate':
+        source=Path(cfg.get('_edit_source',folder.parent/f'iteration_{int(folder.name.split("_")[-1])-1:02d}'))
+        if critique.edit_plan.operation=='fit_silhouette':
+            from gai.shape_fit import fit_mesh
+            candidate=fit_mesh(mesh,source,folder/'local_edit',critique.edit_plan.proposal_id)
+        elif critique.edit_plan.operation=='local_smooth' and critique.edit_plan.evidence_basis=='silhouette_catalog':
+            from gai.shape_fit import smooth_mesh
+            candidate=smooth_mesh(mesh,source,folder/'local_edit',critique.edit_plan.proposal_id)
+        elif critique.edit_plan.operation=='regenerate':
             # A new candidate from the same inputs; never pretend a deformation adds topology.
             job_data=json.loads((folder.parent/'generation_job.json').read_text())
             job_data.update(out=str(folder/'regeneration'),seed=int(job_data['seed'])+int(folder.name.split('_')[-1]))
+            from gai.regeneration import plan_regeneration
+            ref_data=json.loads((source/'references.json').read_text()) if (source/'references.json').is_file() else json.loads((source.parent/'iteration_00/references.json').read_text())
+            regeneration=plan_regeneration(job_data,ref_data,json.loads((source/'metrics.json').read_text()))
+            if job_data.get('backend')=='hunyuan':
+                job_data.update(selected=regeneration['selected'],resolution=max(job_data.get('resolution',256),512))
+            if job_data.get('backend','sf3d')=='sf3d':job_data['retry']=False
             job=folder/'regeneration_job.json';save_json(job,job_data)
             backend=job_data.get('backend','sf3d')
             if backend=='da3':raise UnsupportedEdit('DA3 не поддерживает содержательную повторную генерацию по другому seed')
@@ -124,7 +173,17 @@ def edit(run_id,mesh,folder,critique,cfg):
             command(run_id,[local_path(cfg[backend+'_python']),ROOT/'gai/workers'/worker,job],timeout=7200)
             candidate=folder/'regeneration/mesh.obj'
             canonical_mesh(folder/'regeneration/generated.glb',candidate,cfg['max_faces'])
-            save_json(folder/'edit_report.json',{'backend':'regeneration','plan':critique.edit_plan.model_dump(),'seed':job_data['seed']})
+            chosen=job_data.get('selected',{'front':0})
+            generation_views=list(chosen.values()) if isinstance(chosen,dict) else list(chosen)
+            import math
+            restored=trimesh.load(candidate,force='mesh',process=False)
+            if regeneration['yaw_degrees']:
+                restored.apply_transform(trimesh.transformations.rotation_matrix(math.radians(regeneration['yaw_degrees']),[0,1,0]))
+            from gai.regeneration import register_translation
+            regeneration['translation']=register_translation(restored,source,generation_views)
+            restored.export(candidate)
+            save_json(folder/'edit_report.json',{'backend':'regeneration','plan':critique.edit_plan.model_dump(),'seed':job_data['seed'],
+                'generation_views':generation_views,'resolution':job_data.get('resolution'),'registration':regeneration})
         else:
             candidate=apply_plan(mesh,critique.edit_plan,source,folder/'local_edit')
         validate_candidate(candidate)
@@ -148,7 +207,7 @@ def execute(run_id, resume_critique=False):
     try:
         state=read_run(run_id);params=state['parameters'];refs=state['references']
         if resume_critique:
-            if state['status'] not in {'failed','completed'} or (state['status']=='failed' and state.get('stage')!='critique') or state.get('iteration')!=0 or len(state.get('iterations',[]))>1:
+            if (state['status'] not in {'failed','completed'} and not (state['status']=='queued' and state.get('initial_mesh_import'))) or (state['status']=='failed' and state.get('stage')!='critique') or state.get('iteration')!=0 or len(state.get('iterations',[]))>1:
                 raise ValueError('Повтор оценки поддерживается только для сохранённой исходной модели')
             initial=folder/'iteration_00'
             mesh=ROOT/state['preview_mesh']
@@ -237,13 +296,21 @@ def execute(run_id, resume_critique=False):
                         save_json(initial/'references.json',refs)
                         event(run_id,'Многовидовая реконструкция недоступна: '+str(exc)+'. Сохранён результат SF3D.')
                 save_json(initial/'mesh_info.json',dict(meta,backend=backend))
-        baseline_pairs=None;iterations=[];current_description=params['prompt']
+        baseline_pairs=None;iterations=[];current_description=params['prompt'];excluded_edits=[];excluded_operations=[]
         update_run(run_id,preview_mesh=str(mesh.relative_to(ROOT)),source_glb=str((initial/'generated.glb').relative_to(ROOT)))
         for number in range(params['iterations']+1):
             current=folder/f'iteration_{number:02d}';current.mkdir(exist_ok=True)
             update_run(run_id,stage='render',iteration=number)
             event(run_id,f'Итерация {number}: используются сохранённые рендеры' if resume_critique and number==0 else f'Итерация {number}: EEVEE, фиксированная камера и clay-материал')
-            if not (resume_critique and number==0):render(run_id,mesh,current,cfg)
+            if not (resume_critique and number==0):
+                render_cfg=cfg
+                if number and all('azimuth_deg' in p and 'elevation_deg' in p for p in previous_report['pairs']):
+                    render_cfg=dict(cfg,_render_views=previous_report['pairs']+previous_report.get('audit_views',[]))
+                render(run_id,mesh,current,render_cfg)
+            generation_report=current/'edit_report.json'
+            if generation_report.is_file():
+                inputs=json.loads(generation_report.read_text()).get('generation_views',[])
+                for i,ref in enumerate(refs):ref['used_for_generation']=ref.get('used_for_generation',i==0) or i in inputs
             report=align(refs,current/'renders',baseline_pairs)
             for pair in report['pairs']:
                 pair['reference_azimuth_deg']=refs[pair['reference_index']].get('azimuth_deg')
@@ -252,8 +319,15 @@ def execute(run_id, resume_critique=False):
             views=json.loads((current/'renders/views.json').read_text()) if (current/'renders/views.json').exists() else []
             report['audit_views']=[dict(v,path=str((current/'renders'/v['file']).relative_to(ROOT))) for v in views if (v['azimuth_deg'] in (0,90,180,270) and v['elevation_deg']==0) or abs(v['elevation_deg'])==90]
             report['geometry']=geometry_report(trimesh.load(mesh,force='mesh',process=True))
+            if number and previous_critique.edit_plan and previous_critique.edit_plan.operation=='fit_silhouette':
+                trained={r.reference_index for r in previous_critique.edit_plan.regions}
+                for pair in report['pairs']:pair['used_for_edit']=pair['reference_index'] in trained
+            prior_inputs={p['reference_index'] for p in previous_report['pairs'] if p.get('used_for_edit',False)} if number else {i for i,r in enumerate(refs) if r.get('used_for_edit',False)}
+            for pair in report['pairs']:
+                pair['used_for_edit']=pair.get('used_for_edit',False) or pair['reference_index'] in prior_inputs
             report.update(validation_summary(report))
             save_json(current/'metrics.json',report)
+            save_json(current/'evaluated_mesh.json',{'mesh':str(mesh)})
             if baseline_pairs is None:baseline_pairs=report['pairs']
             update_run(run_id,stage='critique')
             critique=criticize(run_id,current,refs,report,current_description,cfg)
@@ -261,7 +335,24 @@ def execute(run_id, resume_critique=False):
             verification=None
             if number:
                 localized=previous_critique.edit_plan is not None
-                accepted,reason=acceptance(previous_report,report,cfg['acceptance_margin'],require_improvement=not localized)
+                control_before=previous_report
+                if previous_critique.edit_plan and previous_critique.edit_plan.operation=='fit_silhouette':
+                    trained={r.reference_index for r in previous_critique.edit_plan.regions}
+                    control_before=dict(previous_report,pairs=[dict(p,used_for_edit=p.get('used_for_edit',False) or p['reference_index'] in trained) for p in previous_report['pairs']])
+                    report['edit_training_views']=sorted(trained)
+                if previous_critique.edit_plan and previous_critique.edit_plan.operation=='regenerate' and generation_report.is_file():
+                    inputs=set(json.loads(generation_report.read_text()).get('generation_views',[]))
+                    control_before=dict(previous_report,pairs=[dict(p,used_for_generation=p.get('used_for_generation',p['reference_index']==0) or p['reference_index'] in inputs) for p in previous_report['pairs']])
+                accepted,reason=acceptance(control_before,report,cfg['acceptance_margin'],require_improvement=(not localized or previous_critique.edit_plan.operation=='regenerate'))
+                fitting=current/'local_edit/edit_report.json'
+                if fitting.is_file():
+                    fit_data=json.loads(fitting.read_text())
+                    if 'after_fixed_frame_iou' in fit_data:
+                        report['fixed_frame_fit']=fit_data
+                        control=[p['reference_index'] for p in control_before['pairs'] if not p.get('used_for_generation',p['reference_index']==0) and not p.get('used_for_edit',False)]
+                        changes=[fit_data['after_fixed_frame_iou'][str(i)]-fit_data['before_fixed_frame_iou'][str(i)] for i in control]
+                        if not changes or np.mean(changes)<-.005 or min(changes)<-.03:
+                            accepted=False;reason+='; ухудшились независимые контуры в фиксированной системе камеры'
                 if localized:
                     update_run(run_id,stage='verify')
                     event(run_id,'Независимая VLM: сравнение референсов с моделью до и после правки')
@@ -269,19 +360,37 @@ def execute(run_id, resume_critique=False):
                     accepted=accepted and verification['accepted']
                     reason+='; '+verification['reason_ru']
                 if critique.camera_mismatch:accepted=False;reason+='; критик обнаружил несогласование камеры'
+            save_json(current/'metrics.json',report)
             item={'backend':backend,'number':number,'path':str(current.relative_to(ROOT)),'mesh':str(mesh.relative_to(ROOT)),'metrics':report,'critique':critique.model_dump(),'accepted':accepted,'decision':reason}
+            if number:item['edit_source_mesh']=str(best_mesh.relative_to(ROOT))
             if verification is not None:item['verification']=verification
             for edit_report in (current/'local_edit/edit_report.json',current/'edit_report.json'):
                 if edit_report.exists():item['edit_report']=json.loads(edit_report.read_text())
             iterations.append(item);update_run(run_id,iterations=iterations)
             event(run_id,reason)
             if accepted:
-                best_mesh=mesh
+                best_mesh=mesh;best_report=report;best_folder=current;best_critique=critique;excluded_edits=[];excluded_operations=[]
                 # Standalone geometry export, independent of TextDeformer sidecar files.
                 trimesh.load(best_mesh,force='mesh',process=False).export(folder/'best.glb')
                 update_run(run_id,best_mesh=str((folder/'best.glb').relative_to(ROOT)))
             if not accepted:
-                event(run_id,'Правка отклонена; сохранён предыдущий результат');break
+                event(run_id,'Правка отклонена; сохранён предыдущий результат')
+                rejected=previous_critique.edit_plan
+                if rejected and rejected.evidence_basis=='silhouette_catalog' and number<params['iterations']:
+                    excluded_edits.append((rejected.operation,rejected.proposal_id));excluded_operations.append(rejected.operation)
+                    next_folder=folder/f'iteration_{number+1:02d}';next_folder.mkdir(exist_ok=True)
+                    event(run_id,'VLM выбирает другую операцию или область с учётом отклонённого кандидата')
+                    alternative=criticize(run_id,best_folder,refs,best_report,params['prompt'],
+                        dict(cfg,_critic_out=next_folder/'planning',_reuse_observations=best_critique.view_assessments,_excluded_edits=excluded_edits,_excluded_operations=excluded_operations))
+                    if alternative.should_edit and alternative.edit_plan and alternative.edit_plan.operation!='none' and alternative.confidence>=.65:
+                        previous_report=best_report;previous_folder=best_folder;previous_critique=alternative
+                        update_run(run_id,stage='edit')
+                        try:mesh=edit(run_id,best_mesh,next_folder,alternative,dict(cfg,_edit_source=best_folder))
+                        except UnsupportedEdit as exc:
+                            event(run_id,'Альтернативная правка недоступна: '+str(exc));break
+                        current_description=params['prompt']
+                        continue
+                break
             stop_reason=None
             if number>=params['iterations']:
                 stop_reason='Достигнут выбранный лимит итераций'

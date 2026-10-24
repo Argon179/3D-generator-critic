@@ -161,6 +161,22 @@ def get_run(ident:str):
     except (OSError,ValueError):raise HTTPException(404,'Запуск не найден')
 
 
+class RefineRequest(BaseModel):
+    iterations:int=Field(default=3,ge=1,le=3)
+
+
+@app.post('/api/runs/{ident}/refine')
+def refine_saved_run(ident:str,body:RefineRequest):
+    from gai.refinement import create_refinement
+    try:
+        problems=[c for c in weight_checks() if not c['ok'] and 'qwen' in c.get('name','').lower()]
+        if problems:raise ValueError('Веса критика ещё не установлены')
+        state=create_refinement(ident,body.iterations)
+    except (ValueError,FileNotFoundError) as exc:raise HTTPException(400,str(exc)) from exc
+    executor.submit(execute,state['id'],resume_critique=True)
+    return state
+
+
 @app.get('/api/runs/{ident}/stages')
 def get_stages(ident:str):
     from gai.artifacts import stage_inventory

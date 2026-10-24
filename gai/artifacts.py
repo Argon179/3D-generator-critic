@@ -24,10 +24,11 @@ def stage_inventory(ident):
             number=int(parts[0].split('_')[1]);name=p.name
             if 'sf3d_evaluation' in parts:target=generation
             elif 'reconstruction' in parts:target=stage('reconstruction','Многовидовая реконструкция')
+            elif 'shape_evidence' in parts:target=stage(f'critic_{number}',f'Критик и области формы · итерация {number}')
             elif 'verification' in parts:target=stage(f'verify_{number}',f'Независимая проверка до/после · итерация {number}')
             elif 'renders' in parts or name in {'render_job.json','metrics.json'}:
                 target=stage(f'render_{number}',f'Рендеры и метрики · итерация {number}')
-            elif name in {'critique.json','critic_job.json','raw_response.txt','critic_prompt.txt','view_assessments.json'} or name.startswith(('view_','plan_')) and p.suffix in {'.json','.txt'}:
+            elif name in {'critique.json','critic_job.json','raw_response.txt','critic_prompt.txt','view_assessments.json','proposal_choices.json','evaluated_mesh.json'} or name.startswith(('view_','plan_','choice_')) and p.suffix in {'.json','.txt'}:
                 target=stage(f'critic_{number}',f'Критик · итерация {number}')
             elif number>0:target=stage(f'edit_{number}',f'Редактирование · итерация {number}')
             else:target=generation
@@ -57,7 +58,7 @@ def stage_inventory(ident):
     for number,item in enumerate(state.get('iterations',[])):
         target=stages.get(f"edit_{item['number']}")
         if target and number:
-            target['models'].insert(0,{'path':state['iterations'][number-1]['mesh'],'label':'До правки'})
+            target['models'].insert(0,{'path':item.get('edit_source_mesh',state['iterations'][number-1]['mesh']),'label':'До правки'})
             target['comparison']=item
     log=folder/'process.log'
     if log.exists():

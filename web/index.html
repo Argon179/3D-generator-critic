@@ -18,7 +18,7 @@
 <div class="aside-note">Основной режим — Hunyuan по нескольким сторонам. DA3 — экспериментальная реконструкция глубины и камер. «Авто» использует прежнюю реконструкцию по силуэтам или SF3D. VLM выбирает локальную правку или повторную генерацию; каждый кандидат проверяется до принятия.</div>
 </aside>
 <section class="workspace">
-<div class="workspace-heading"><div><div class="eyebrow">02 / ЭКСПЕРИМЕНТ</div><h2 id="runTitle">Рабочая область</h2></div><div class="toolbar"><select id="history"><option value="">История запусков</option></select><button id="cancel" class="ghost" hidden>Остановить</button></div></div>
+<div class="workspace-heading"><div><div class="eyebrow">02 / ЭКСПЕРИМЕНТ</div><h2 id="runTitle">Рабочая область</h2></div><div class="toolbar"><select id="history"><option value="">История запусков</option></select><button id="refine" class="ghost" hidden>Уточнить эту модель</button><button id="cancel" class="ghost" hidden>Остановить</button></div></div>
 <div class="steps" id="steps"><span data-stage="generate">1 Генерация</span><span data-stage="render">2 Рендеры</span><span data-stage="critique">3 Критика</span><span data-stage="edit">4 Правка</span></div>
 <div id="empty" class="empty"><div class="orb">◈</div><h2>Форма рождается в итерациях</h2><p>Выберите объект и запустите эксперимент.<br>Здесь появятся модель, сравнения и замечания критика.</p><div class="tags"><span>Локально</span><span>4-bit VLM</span><span>История правок</span></div></div>
 <div id="runContent" hidden><div class="status-line"><span id="status" class="badge"></span><span id="stageText" class="muted"></span><a id="logLink" target="_blank">Журнал ↗</a></div><div id="runError" class="error"></div>
@@ -33,4 +33,4 @@
 </section>
 </main>
 <dialog id="health"><div class="card-top"><h2>Окружение</h2><button id="closeHealth" class="ghost">✕</button></div><div id="healthChecks"></div><p class="hint">SF3D требует принятия условий Hugging Face. Проверка импортов не подтверждает наличие весов.</p><button id="refreshHealth" class="ghost">Проверить снова</button></dialog>
-<script src="/app.js?v=critic-json-1"></script></body></html>
+<script src="/app.js?v=contour-plans-2"></script></body></html>
